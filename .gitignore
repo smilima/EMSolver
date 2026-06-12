@@ -18,5 +18,32 @@ __recovery/
 *.twopts
 *.stat
 
+# Compiled objects / debug info
+*.d
+*.o
+*.obj
+*.pch
+*.gch
+*.ilk
+*.pdb
+*.tds
+
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+*.out
+*.app
+
+# Temporary files
+*.tmp
+*.log
+*.swp
+
 # test output
 selftest.txt
+Testing/
+.cache/
