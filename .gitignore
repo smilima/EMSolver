@@ -1,0 +1,22 @@
+# C++Builder build output
+Win64x/
+Win32/
+Win64/
+
+# IDE local/temp files
+__history/
+__recovery/
+*.local
+*.identcache
+*.projdata
+*.tvsconfig
+*.dsk
+*.dsv
+*.~*
+*.bak
+*.@@@
+*.twopts
+*.stat
+
+# test output
+selftest.txt
