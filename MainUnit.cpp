@@ -34,6 +34,15 @@ static String FmtD(double v)
 }
 
 //---------------------------------------------------------------------------
+// physical RAM available to allocations, in bytes (0 if the query fails)
+static unsigned long long AvailablePhysBytes()
+{
+    MEMORYSTATUSEX ms;
+    ms.dwLength = sizeof(ms);
+    return GlobalMemoryStatusEx(&ms) ? ms.ullAvailPhys : 0ULL;
+}
+
+//---------------------------------------------------------------------------
 __fastcall TMainForm::TMainForm(TComponent* Owner)
     : TForm(Owner)
 {
@@ -394,22 +403,42 @@ void TMainForm::startSimulation()
                     c.z - g.nz * dl * 0.5f);
 
     long long cells = (long long)g.nx * g.ny * g.nz;
-    double memMb = cells * (12.0 * 4.0 + 1.0) / (1024.0 * 1024.0);
-    if (cells > 60000000LL)
+    // per-cell working memory: TLM keeps 12 link pulses/cell, FDTD keeps 6
+    // staggered fields plus Mur snapshot planes. The limit is the machine's
+    // free RAM, not a fixed cell count - big TLM grids just take longer.
+    bool anyDiel = false;
+    for (const auto &e : objects)
+        if (e.obj.dielectric) { anyDiel = true; break; }
+    double bytesPerCell = (cbSolver->ItemIndex == 1)
+        ? (anyDiel ? 120.0 : 96.0)            // FDTD (fields + Mur planes)
+        : (anyDiel ? 64.0  : 52.0);           // TLM (12 pulses + mat)
+    double needMb = cells * bytesPerCell / (1024.0 * 1024.0);
+    double memMb  = needMb;
+
+    bool timeDomain = (cbSolver->ItemIndex == 0 || cbSolver->ItemIndex == 1);
+    if (timeDomain)
     {
-        MessageDlg(String().sprintf(
-            L"Grid is too large: %d x %d x %d = %.0f M cells (%.0f MB).\n"
-            L"Reduce cells/lambda, padding, or model size.",
-            g.nx, g.ny, g.nz, cells / 1e6, memMb),
-            mtError, TMsgDlgButtons() << mbOK, 0);
-        return;
+        unsigned long long avail = AvailablePhysBytes();
+        double availMb = avail / (1024.0 * 1024.0);
+        if (avail > 0 && needMb > 0.85 * availMb)
+        {
+            MessageDlg(String().sprintf(
+                L"Grid needs ~%.0f MB but only %.0f MB RAM is free.\n"
+                L"%d x %d x %d = %.0f M cells.\n\n"
+                L"Close other applications, reduce cells/lambda or padding, "
+                L"or add RAM.",
+                needMb, availMb, g.nx, g.ny, g.nz, cells / 1e6),
+                mtError, TMsgDlgButtons() << mbOK, 0);
+            return;
+        }
+        if (needMb > 1500.0 &&
+            MessageDlg(String().sprintf(
+                L"Large grid: %d x %d x %d = %.0f M cells, ~%.1f GB RAM.\n"
+                L"This will run but may take a while. Continue?",
+                g.nx, g.ny, g.nz, cells / 1e6, needMb / 1024.0),
+                mtConfirmation, TMsgDlgButtons() << mbYes << mbNo, 0) != mrYes)
+            return;
     }
-    if (cells > 20000000LL &&
-        MessageDlg(String().sprintf(
-            L"Large grid: %d x %d x %d = %.0f M cells (%.0f MB RAM). Continue?",
-            g.nx, g.ny, g.nz, cells / 1e6, memMb),
-            mtConfirmation, TMsgDlgButtons() << mbYes << mbNo, 0) != mrYes)
-        return;
 
     // ---- voxelize geometry ----
     std::vector<uint8_t> mat;
@@ -849,7 +878,7 @@ void __fastcall TMainForm::OnMeshClick(TObject *)
             mtError, TMsgDlgButtons() << mbOK, 0);
         return;
     }
-    if (!femSel && cells > 60000000LL)
+    if (!femSel && cells > 800000000LL)   // preview needs only ~1 byte/cell
     {
         MessageDlg(L"Grid is too large to preview. Reduce cells per lambda "
                    L"or padding.", mtError, TMsgDlgButtons() << mbOK, 0);

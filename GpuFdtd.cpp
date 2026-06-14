@@ -360,9 +360,9 @@ bool RunGpuFdtd(FdtdSolver &s, std::string &msg)
     const int nx = s.g.nx, ny = s.g.ny, nz = s.g.nz;
     const long long ncell = (long long)nx * ny * nz;
     if (ncell <= 0) { msg = "empty grid"; return false; }
-    if (ncell > 9000000LL)
+    if (ncell > 40000000LL)  // VRAM-bound; buffer alloc below falls back if it won't fit
     {
-        msg = "grid too large for the GPU FDTD path (>9 M cells)";
+        msg = "grid too large for the GPU FDTD path (>40 M cells)";
         return false;
     }
 

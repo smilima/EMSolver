@@ -537,9 +537,9 @@ bool GpuTlm::run(TlmSolver &s, std::string &msg)
         msg = "empty grid";
         return false;
     }
-    if (n > 14000000)
+    if (n > 60000000)   // VRAM-bound; buffer alloc below falls back if it won't fit
     {
-        msg = "grid too large for the GPU path (>14 M cells)";
+        msg = "grid too large for the GPU path (>60 M cells)";
         return false;
     }
 
