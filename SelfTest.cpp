@@ -21,6 +21,7 @@
 #include "FdtdSolver.h"
 #include "FemSolver.h"
 #include "MomSolver.h"
+#include "MomSurface.h"
 #include <cstdio>
 #include <cmath>
 #include <algorithm>
@@ -779,6 +780,76 @@ int RunSelfTest()
                 check(rel < 0.05, "GPU MoM Zin matches CPU MoM (rel < 5%)",
                       rel, 0.05);
             }
+        }
+    }
+
+    // --- 11. surface RWG MoM: PEC plate plane-wave scattering ---
+    {
+        double f0 = 1e9, lam = C0 / f0;
+        // 1.2 lambda square plate in the x-y plane, ~lambda/10 triangles
+        double D = 1.2 * lam;
+        int nd = 12;
+        TriMesh plate;
+        for (int j = 0; j < nd; ++j)
+            for (int i = 0; i < nd; ++i)
+            {
+                double x0 = -D/2 + D*i/nd, x1 = -D/2 + D*(i+1)/nd;
+                double y0 = -D/2 + D*j/nd, y1 = -D/2 + D*(j+1)/nd;
+                Vec3 a((float)x0,(float)y0,0), b((float)x1,(float)y0,0);
+                Vec3 c((float)x1,(float)y1,0), d((float)x0,(float)y1,0);
+                plate.addTri(a, b, c);
+                plate.addTri(a, c, d);
+            }
+        // plane wave travels +z (propAxis 2), E along x (polAxis 0)
+        MomSurface ms;
+        ms.setup(plate, 2, 0, (float)f0, false);
+        ms.run();
+        fprintf(f, "      MoM surface: %d tris, %d RWG unknowns\n",
+                ms.numTris(), ms.numUnknowns());
+        check(ms.numUnknowns() > 50, "RWG plate assembled (unknowns > 50)",
+              ms.numUnknowns(), 0.0);
+        float sym = ms.matrixSymmetryError();
+        check(sym < 1e-4f, "RWG matrix complex-symmetric (Galerkin)", sym, 1e-4);
+
+        std::vector<Vec3> sv; std::vector<int> si; std::vector<float> sm;
+        ms.getTriCurrents(sv, si, sm);
+        float mx = 0; bool fin = true;
+        for (float v : sm) { if (!std::isfinite(v)) fin = false; mx = std::max(mx, v); }
+        check(fin && mx > 0.0f, "RWG surface currents finite, nonzero", mx, 0.0);
+
+        // normal incidence on a plate -> backscatter peak along z (theta 0/180)
+        FarFieldData ff;
+        bool ffOk = ms.computeFarField(ff);
+        bool axial = ffOk && (ff.peakThetaDeg < 35.0f || ff.peakThetaDeg > 145.0f);
+        check(axial, "RWG plate scatters specularly along z (theta ~0/180)",
+              ffOk ? ff.peakThetaDeg : -1.0f, 0.0);
+
+        // GPU surface MoM vs CPU
+        MomSurface mg;
+        mg.setup(plate, 2, 0, (float)f0, true);
+        mg.run();
+        if (!mg.ranOnGpu())
+            fprintf(f, "SKIP  GPU surface MoM unavailable: %s\n",
+                    mg.gpuStatus().c_str());
+        else
+        {
+            fprintf(f, "      GPU surface MoM adapter: %s\n", mg.gpuStatus().c_str());
+            // The flat-plate EFIE matrix is ill-conditioned, so raw currents
+            // are sensitive to fill precision (float GPU vs double CPU). The
+            // scattered far field is the robust, physically meaningful check.
+            FarFieldData ffg;
+            bool gOk = mg.computeFarField(ffg);
+            bool dirOk = gOk && ffOk &&
+                std::fabs(ffg.directivity - ff.directivity) <
+                    0.25 * std::max(0.1f, ff.directivity);
+            bool peakOk = gOk &&
+                (ffg.peakThetaDeg < 35.0f || ffg.peakThetaDeg > 145.0f);
+            fprintf(f, "      GPU far-field D=%.2f (CPU %.2f), peak theta=%.0f\n",
+                    gOk ? ffg.directivity : 0.0f, ff.directivity,
+                    gOk ? ffg.peakThetaDeg : -1.0f);
+            check(dirOk && peakOk,
+                  "GPU surface MoM far-field matches CPU (D within 25%)",
+                  gOk ? ffg.directivity : 0.0f, ff.directivity);
         }
     }
 

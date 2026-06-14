@@ -47,6 +47,12 @@ public:
                          const std::vector<float> &mag);
     void clearWireCurrents();
 
+    // MoM surface currents: vertices, triangle indices (3/tri), |J| per tri
+    void setTriCurrents(const std::vector<Vec3> &verts,
+                        const std::vector<int> &idx,
+                        const std::vector<float> &triMag);
+    void clearTriCurrents();
+
     // synchronous framebuffer capture (RGB, top-down row order)
     bool captureFrame(std::vector<unsigned char> &rgb, int &w, int &h);
 
@@ -149,6 +155,12 @@ private:
     std::vector<Vec3> wirePts;
     std::vector<float> wireMag;
     float wireNorm = 0.0f;
+
+    // MoM surface currents
+    std::vector<Vec3> triCurV;
+    std::vector<int>  triCurIdx;
+    std::vector<float> triCurMag;
+    float triCurNorm = 0.0f;
 };
 
 #endif

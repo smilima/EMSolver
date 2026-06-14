@@ -25,6 +25,7 @@
 #include "FdtdSolver.h"
 #include "FemSolver.h"
 #include "MomSolver.h"
+#include "MomSurface.h"
 #include "GLView.h"
 #include "GifWriter.h"
 
@@ -132,8 +133,10 @@ private:        // User declarations
     std::unique_ptr<IFieldSolver> solver;
     std::unique_ptr<FemSolver> femSolver;
     std::unique_ptr<MomSolver> momSolver;
+    std::unique_ptr<MomSurface> momSurf;
     bool                       usingFem      = false;
     bool                       usingMom      = false;
+    bool                       usingMomSurf  = false;
     std::thread                solverThread;
     bool                       threadJoined  = true;
     bool                       dftLoaded     = false;
@@ -176,6 +179,7 @@ private:        // User declarations
     void updatePwMarker();
     void finishFemRun();
     void finishMomRun();
+    void finishMomSurfRun();
     void updateMeshView();
     void voxelizeScene(const VoxelGridSpec &g, std::vector<uint8_t> &mat,
                        std::vector<MatProps> &table);

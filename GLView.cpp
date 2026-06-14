@@ -455,6 +455,39 @@ void TGLView::drawScene()
         glLineWidth(1.0f);
     }
 
+    // MoM surface currents (color each triangle by |J|)
+    if (!triCurIdx.empty() && triCurMag.size() * 3 == triCurIdx.size())
+    {
+        float norm = (triCurNorm > 0.0f) ? triCurNorm : 1.0f;
+        currentMax = 0.0f;
+        for (float v : triCurMag)
+            currentMax = std::max(currentMax, v);
+        glDisable(GL_LIGHTING);
+        glBegin(GL_TRIANGLES);
+        for (size_t t = 0; t < triCurMag.size(); ++t)
+        {
+            float tt;
+            if (dbScale)
+            {
+                float db = 20.0f * std::log10(std::max(triCurMag[t],
+                              norm * 1e-7f) / norm);
+                tt = (db + dbRange) / dbRange;
+            }
+            else
+                tt = triCurMag[t] / norm;
+            if (tt > 1.0f) tt = 1.0f;
+            float rgb[3];
+            JetColor(tt, rgb);
+            glColor3f(rgb[0], rgb[1], rgb[2]);
+            for (int c = 0; c < 3; ++c)
+            {
+                const Vec3 &v = triCurV[triCurIdx[t * 3 + c]];
+                glVertex3f(v.x, v.y, v.z);
+            }
+        }
+        glEnd();
+    }
+
     drawFieldPlane();
 }
 
@@ -504,6 +537,33 @@ void TGLView::clearWireCurrents()
 {
     wirePts.clear();
     wireMag.clear();
+    Invalidate();
+}
+
+void TGLView::setTriCurrents(const std::vector<Vec3> &verts,
+                             const std::vector<int> &idx,
+                             const std::vector<float> &triMag)
+{
+    triCurV = verts;
+    triCurIdx = idx;
+    triCurMag = triMag;
+    triCurNorm = 0.0f;
+    if (!triMag.empty())
+    {
+        std::vector<float> tmp = triMag;
+        size_t kk = (size_t)(tmp.size() * 0.99);
+        if (kk >= tmp.size()) kk = tmp.size() - 1;
+        std::nth_element(tmp.begin(), tmp.begin() + kk, tmp.end());
+        triCurNorm = tmp[kk];
+    }
+    Invalidate();
+}
+
+void TGLView::clearTriCurrents()
+{
+    triCurV.clear();
+    triCurIdx.clear();
+    triCurMag.clear();
     Invalidate();
 }
 

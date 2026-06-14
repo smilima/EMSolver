@@ -207,12 +207,15 @@ void TMainForm::invalidateResults()
     usingFem = false;
     momSolver.reset();
     usingMom = false;
+    momSurf.reset();
+    usingMomSurf = false;
     meshPreviewShown = false;
     glView->clearSurfaceData();
     glView->clearPlaneData();
     glView->clearPattern();
     glView->clearMeshEdges();
     glView->clearWireCurrents();
+    glView->clearTriCurrents();
     glView->setDomain(Aabb(), false);
     resetPlayback(false);
     updatePwMarker();
@@ -527,6 +530,61 @@ void TMainForm::startSimulation()
     usingMom = false;
     momSolver.reset();
 
+    // ---- surface MoM (RWG EFIE, plane-wave scattering) path ----
+    if (cbSolver->ItemIndex == 4)
+    {
+        if (!planeWave)
+        {
+            MessageDlg(L"The surface MoM solver computes plane-wave "
+                       L"scattering. Switch the excitation to Plane wave.",
+                       mtInformation, TMsgDlgButtons() << mbOK, 0);
+            return;
+        }
+        TriMesh combined;
+        for (const auto &e : objects)
+        {
+            if (e.obj.dielectric || e.obj.mesh.verts.empty())
+                continue;
+            TriMesh m = e.obj.mesh;
+            m.transform(e.obj.position);
+            combined.append(m);
+        }
+        if (combined.triCount() < 2)
+        {
+            MessageDlg(L"The surface MoM solver needs a PEC surface object "
+                       L"(plate, box, sphere, horn, or imported STL).",
+                       mtInformation, TMsgDlgButtons() << mbOK, 0);
+            return;
+        }
+        int pa = std::max(0, std::min(2, (int)simValue(L"PW prop axis (0..2)", 0)));
+        int pol = std::max(0, std::min(2, (int)simValue(L"PW pol axis (0..2)", 2)));
+        if (pol == pa) pol = (pa + 2) % 3;
+        usingMomSurf = true;
+        usingFem = false; usingMom = false;
+        momSurf.reset(new MomSurface());
+        momSurf->setup(combined, pa, pol, (float)f0, chkGpu->Checked);
+        haveGrid = false; dftLoaded = false;
+        glView->clearPattern();
+        glView->clearSurfaceData();
+        glView->clearPlaneData();
+        glView->clearMeshEdges();
+        glView->clearWireCurrents();
+        glView->clearTriCurrents();
+        glView->setDomain(Aabb(), false);
+        resetPlayback(false);
+        statusBar->Panels->Items[0]->Text = String().sprintf(
+            L"Surface MoM: building RWG mesh (%d triangles) and solving at "
+            L"%.4g GHz...", combined.triCount(), f0 / 1e9);
+        MomSurface *ms = momSurf.get();
+        solverThread = std::thread([ms] { ms->run(); });
+        threadJoined = false;
+        btnRun->Enabled  = false;
+        btnStop->Enabled = true;
+        return;
+    }
+    usingMomSurf = false;
+    momSurf.reset();
+
     // ---- FEM (frequency domain) path ----
     if (cbSolver->ItemIndex == 2)
     {
@@ -691,6 +749,8 @@ void TMainForm::stopSimulation(bool wait)
         femSolver->requestStop();
     if (momSolver)
         momSolver->requestStop();
+    if (momSurf)
+        momSurf->requestStop();
     if (wait)
         finishThread();
 }
@@ -710,7 +770,7 @@ void TMainForm::finishThread()
 //---------------------------------------------------------------------------
 void TMainForm::updateVisualization()
 {
-    if (usingFem || usingMom)
+    if (usingFem || usingMom || usingMomSurf)
         return;             // FEM/MoM display is set once on finish
     if (!solver || !haveGrid)
         return;
@@ -931,8 +991,42 @@ void TMainForm::finishMomRun()
         momSolver->numUnknowns());
 }
 
+void TMainForm::finishMomSurfRun()
+{
+    btnRun->Enabled  = true;
+    btnStop->Enabled = false;
+    std::vector<Vec3> v; std::vector<int> idx; std::vector<float> mag;
+    momSurf->getTriCurrents(v, idx, mag);
+    glView->setTriCurrents(v, idx, mag);
+    String where = momSurf->ranOnGpu()
+        ? String().sprintf(L"GPU: %hs", momSurf->gpuStatus().c_str())
+        : String(L"CPU");
+    statusBar->Panels->Items[0]->Text = String().sprintf(
+        L"Surface MoM (%s):  %d triangles, %d RWG unknowns. Wire/face color "
+        L"= |J|; Far-field gives the scattered pattern / RCS.",
+        where.c_str(), momSurf->numTris(), momSurf->numUnknowns());
+}
+
 void __fastcall TMainForm::OnTimerTick(TObject *)
 {
+    if (usingMomSurf)
+    {
+        if (!momSurf)
+            return;
+        statusBar->Panels->Items[1]->Text = String().sprintf(
+            L"%hs  %d / %d", momSurf->phase().c_str(),
+            momSurf->currentStep(), momSurf->totalSteps());
+        statusBar->Panels->Items[2]->Text = String().sprintf(
+            L"Residual %.3g", (double)momSurf->residual());
+        if (momSurf->isFinished())
+        {
+            finishThread();
+            if (!dftLoaded) { dftLoaded = true; finishMomSurfRun(); }
+        }
+        statusBar->Panels->Items[3]->Text = String().sprintf(
+            L"|J|max %.3g", (double)glView->currentMax);
+        return;
+    }
     if (usingMom)
     {
         if (!momSolver)
@@ -1306,6 +1400,38 @@ void __fastcall TMainForm::OnFarFieldClick(TObject *)
     if (glView->hasPattern())
     {
         glView->clearPattern();
+        return;
+    }
+    if (usingMomSurf)
+    {
+        if (!momSurf || !momSurf->isFinished())
+        {
+            MessageDlg(L"Run the surface MoM solve first.", mtInformation,
+                       TMsgDlgButtons() << mbOK, 0);
+            return;
+        }
+        Screen->Cursor = crHourGlass;
+        FarFieldData ffs;
+        bool oks = momSurf->computeFarField(ffs);
+        Screen->Cursor = crDefault;
+        if (!oks)
+        {
+            MessageDlg(L"No far-field data from the surface MoM run.",
+                       mtInformation, TMsgDlgButtons() << mbOK, 0);
+            return;
+        }
+        std::vector<Vec3> vv; std::vector<int> ii; std::vector<float> mm;
+        momSurf->getTriCurrents(vv, ii, mm);
+        Aabb b;
+        for (const auto &p : vv) b.grow(p);
+        Vec3 center = b.valid() ? b.center() : Vec3(0,0,0);
+        float scale = b.valid() ? 0.6f * b.size().length() : 1.0f;
+        glView->setPattern(ffs, center, scale);
+        statusBar->Panels->Items[0]->Text = String().sprintf(
+            L"Surface MoM scattered field:  D = %.2f dBi,  peak at theta=%.0f "
+            L"deg, phi=%.0f deg  (bistatic pattern).",
+            10.0 * std::log10(std::max(1e-6f, ffs.directivity)),
+            ffs.peakThetaDeg, ffs.peakPhiDeg);
         return;
     }
     if (usingMom)

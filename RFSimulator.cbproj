@@ -235,6 +235,10 @@
             <DependentOn>GpuMom.h</DependentOn>
             <BuildOrder>18</BuildOrder>
         </CppCompile>
+        <CppCompile Include="MomSurface.cpp">
+            <DependentOn>MomSurface.h</DependentOn>
+            <BuildOrder>19</BuildOrder>
+        </CppCompile>
         <CppCompile Include="MainUnit.cpp">
             <Form>MainForm</Form>
             <FormType>dfm</FormType>

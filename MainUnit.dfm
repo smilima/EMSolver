@@ -109,7 +109,8 @@ object MainForm: TMainForm
         'Solver: TLM (time domain)'
         'Solver: FDTD (time domain)'
         'Solver: FEM (frequency)'
-        'Solver: MoM (wire)')
+        'Solver: MoM (wire)'
+        'Solver: MoM (surface)')
     end
     object cbCurrents: TComboBox
       Left = 609
