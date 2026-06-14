@@ -158,4 +158,9 @@ void BuildVoxelOutline(const VoxelGridSpec &g,
                        const std::vector<uint8_t> &mat,
                        std::vector<Vec3> &segments, size_t maxSegments);
 
+// Vertex-clustering decimation: snap vertices to a grid of size 'cell',
+// weld coincident clusters, drop degenerate triangles. Coarsens a dense
+// mesh (e.g. a high-poly STL) to a size suitable for surface MoM.
+void ClusterDecimate(const TriMesh &in, float cell, TriMesh &out);
+
 #endif

@@ -588,10 +588,33 @@ void TMainForm::startSimulation()
         int pa = std::max(0, std::min(2, (int)simValue(L"PW prop axis (0..2)", 0)));
         int pol = std::max(0, std::min(2, (int)simValue(L"PW pol axis (0..2)", 2)));
         if (pol == pa) pol = (pa + 2) % 3;
+        momSurf.reset(new MomSurface());
+        Screen->Cursor = crHourGlass;
+        momSurf->setup(combined, pa, pol, (float)f0, chkGpu->Checked);
+        Screen->Cursor = crDefault;
+        int momN = momSurf->numUnknowns();
+        if (momN == 0)
+        {
+            momSurf.reset();
+            MessageDlg(L"This mesh produced no RWG basis functions - it is "
+                       L"likely not watertight/manifold (gaps or loose "
+                       L"triangles). MoM needs a closed surface. Try a "
+                       L"cleaner STL or repair the mesh.",
+                       mtError, TMsgDlgButtons() << mbOK, 0);
+            return;
+        }
+        if ((double)momN * momN * 16.0 > 4.0e9)
+        {
+            momSurf.reset();
+            MessageDlg(String().sprintf(
+                L"Mesh is too detailed for MoM even after decimation "
+                L"(%d unknowns -> %.1f GB matrix). Use a coarser STL.",
+                momN, momN * (double)momN * 16.0 / 1e9),
+                mtError, TMsgDlgButtons() << mbOK, 0);
+            return;
+        }
         usingMomSurf = true;
         usingFem = false; usingMom = false;
-        momSurf.reset(new MomSurface());
-        momSurf->setup(combined, pa, pol, (float)f0, chkGpu->Checked);
         haveGrid = false; dftLoaded = false;
         glView->clearPattern();
         glView->clearSurfaceData();
@@ -601,9 +624,13 @@ void TMainForm::startSimulation()
         glView->clearTriCurrents();
         glView->setDomain(Aabb(), false);
         resetPlayback(false);
+        String decNote = momSurf->reducedFromTris() > 0
+            ? String().sprintf(L"decimated %d -> %d tris, ",
+                momSurf->reducedFromTris(), momSurf->numTris())
+            : String();
         statusBar->Panels->Items[0]->Text = String().sprintf(
-            L"Surface MoM: building RWG mesh (%d triangles) and solving at "
-            L"%.4g GHz...", combined.triCount(), f0 / 1e9);
+            L"Surface MoM: %s%d RWG unknowns, solving at %.4g GHz...",
+            decNote.c_str(), momN, f0 / 1e9);
         MomSurface *ms = momSurf.get();
         solverThread = std::thread([ms] { ms->run(); });
         threadJoined = false;
@@ -860,6 +887,58 @@ void TMainForm::updateMeshView()
 //---------------------------------------------------------------------------
 void __fastcall TMainForm::OnMeshClick(TObject *)
 {
+    // ---- surface MoM: show the decimated RWG triangulation ----
+    if (cbSolver->ItemIndex == 4)
+    {
+        TriMesh combined;
+        for (const auto &e : objects)
+        {
+            if (e.obj.dielectric || e.obj.mesh.verts.empty())
+                continue;
+            TriMesh m = e.obj.mesh;
+            m.transform(e.obj.position);
+            combined.append(m);
+        }
+        if (combined.triCount() < 2)
+        {
+            MessageDlg(L"Surface MoM needs a PEC surface object (plate, box, "
+                       L"sphere, horn, or imported STL).",
+                       mtInformation, TMsgDlgButtons() << mbOK, 0);
+            return;
+        }
+        double f0 = simValue(L"Frequency (MHz)", 1000.0) * 1e6;
+        if (f0 <= 0) f0 = 1e9;
+        Screen->Cursor = crHourGlass;
+        MomSurface tmp;
+        tmp.setup(combined, 0, 0, (float)f0, false);   // decimate + build RWG
+        std::vector<Vec3> v; std::vector<int> idx; std::vector<float> mag;
+        tmp.getTriCurrents(v, idx, mag);
+        // wireframe: 3 edges per triangle
+        std::vector<Vec3> segs;
+        segs.reserve(idx.size() * 2);
+        for (size_t t = 0; t + 2 < idx.size(); t += 3)
+            for (int e = 0; e < 3; ++e)
+            {
+                segs.push_back(v[idx[t + e]]);
+                segs.push_back(v[idx[t + (e + 1) % 3]]);
+            }
+        Screen->Cursor = crDefault;
+        glView->setMeshEdges(segs);
+        chkMesh->Checked = true;
+        meshPreviewShown = true;
+        glView->setDomain(Aabb(), false);
+        String decNote = tmp.reducedFromTris() > 0
+            ? String().sprintf(L"decimated %d -> %d tris, ",
+                tmp.reducedFromTris(), tmp.numTris())
+            : String().sprintf(L"%d tris, ", tmp.numTris());
+        double mb = tmp.numUnknowns() * (double)tmp.numUnknowns() * 16.0 / 1e6;
+        statusBar->Panels->Items[0]->Text = String().sprintf(
+            L"MoM surface mesh: %s%d RWG unknowns (dense matrix ~%.0f MB). "
+            L"Wireframe shows the MoM triangulation.",
+            decNote.c_str(), tmp.numUnknowns(), mb);
+        return;
+    }
+
     VoxelGridSpec g;
     if (!computeGridPreview(g))
     {
@@ -1030,10 +1109,14 @@ void TMainForm::finishMomSurfRun()
     String where = momSurf->ranOnGpu()
         ? String().sprintf(L"GPU: %hs", momSurf->gpuStatus().c_str())
         : String(L"CPU");
+    String decNote = momSurf->reducedFromTris() > 0
+        ? String().sprintf(L" (decimated from %d)", momSurf->reducedFromTris())
+        : String();
     statusBar->Panels->Items[0]->Text = String().sprintf(
-        L"Surface MoM (%s):  %d triangles, %d RWG unknowns. Wire/face color "
-        L"= |J|; Far-field gives the scattered pattern / RCS.",
-        where.c_str(), momSurf->numTris(), momSurf->numUnknowns());
+        L"Surface MoM (%s):  %d triangles%s, %d RWG unknowns. Face color = "
+        L"|J|; Far-field gives the scattered pattern / RCS.",
+        where.c_str(), momSurf->numTris(), decNote.c_str(),
+        momSurf->numUnknowns());
 }
 
 void __fastcall TMainForm::OnTimerTick(TObject *)

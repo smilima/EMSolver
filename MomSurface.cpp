@@ -65,7 +65,36 @@ void MomSurface::setup(const TriMesh &mesh, int prop, int pol, float freq,
     usedGpu  = false;
     gpuMsg.clear();
     phaseText = "idle";
-    buildRwg(mesh);
+
+    // A dense MoM matrix is N x N (N ~ 1.5 x triangles) and the direct solve
+    // is O(N^3), so a high-poly STL must be coarsened. Small meshes pass
+    // through unchanged; large ones are vertex-clustered down to a tractable
+    // triangle count (2000 tris -> ~3000 unknowns -> a few-second fill and a
+    // ~30 s solve, plenty for an electrically small object).
+    const int MAXTRI = 2000;
+    decimatedFrom = 0;
+    if (mesh.triCount() <= MAXTRI)
+    {
+        buildRwg(mesh);
+    }
+    else
+    {
+        Aabb bb;
+        for (const auto &v : mesh.verts)
+            bb.grow(v);
+        float diag = bb.valid() ? bb.size().length() : 1.0f;
+        float cell = diag * 0.01f;
+        TriMesh dec;
+        ClusterDecimate(mesh, cell, dec);
+        int guard = 0;
+        while (dec.triCount() > MAXTRI && guard++ < 30)
+        {
+            cell *= 1.3f;
+            ClusterDecimate(mesh, cell, dec);
+        }
+        decimatedFrom = mesh.triCount();
+        buildRwg(dec);
+    }
 }
 
 //---------------------------------------------------------------------------
@@ -380,7 +409,15 @@ void MomSurface::run()
     running = true;
     if (N == 0)
     {
-        phaseText = "no RWG basis (need a closed/larger triangle mesh)";
+        phaseText = "no RWG basis (need a closed/manifold triangle mesh)";
+        finished = true; running = false;
+        return;
+    }
+    // dense matrix guard: never attempt an allocation that would fail.
+    // N*N complex doubles (CPU) = 16*N^2 bytes. Cap at a safe size.
+    if ((double)N * N * 16.0 > 4.0e9)   // ~4 GB matrix
+    {
+        phaseText = "mesh too detailed for MoM";
         finished = true; running = false;
         return;
     }

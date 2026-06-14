@@ -45,6 +45,7 @@ public:
 
     int numUnknowns() const { return N; }
     int numTris()     const { return (int)tris.size() / 3; }
+    int reducedFromTris() const { return decimatedFrom; } // 0 = no decimation
 
     // per-triangle |J| for display (and the mesh it refers to)
     void getTriCurrents(std::vector<Vec3> &verts, std::vector<int> &idx,
@@ -74,6 +75,7 @@ private:
     std::vector<float> triA;    // area
     std::vector<Rwg>   rwg;
     int N = 0;
+    int decimatedFrom = 0;
 
     int   propAxis = 0, polAxis = 2;
     float f0 = 1e9f;

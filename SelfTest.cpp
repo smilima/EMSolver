@@ -853,6 +853,39 @@ int RunSelfTest()
         }
     }
 
+    // --- 12. surface MoM auto-decimation of a high-poly mesh (no crash) ---
+    {
+        double f0 = 1e9, lam = C0 / f0;
+        TriMesh fine;
+        int nu = 80, nv = 60;          // ~9600 triangles, above the MoM cap
+        double r = 0.4 * lam;
+        for (int v = 0; v < nv; ++v)
+        {
+            double t0 = M_PI*v/nv, t1 = M_PI*(v+1)/nv;
+            for (int u = 0; u < nu; ++u)
+            {
+                double p0 = 2*M_PI*u/nu, p1 = 2*M_PI*(u+1)/nu;
+                auto sp = [&](double th, double ph){
+                    return Vec3((float)(r*std::sin(th)*std::cos(ph)),
+                                (float)(r*std::sin(th)*std::sin(ph)),
+                                (float)(r*std::cos(th))); };
+                fine.addQuad(sp(t0,p0), sp(t0,p1), sp(t1,p1), sp(t1,p0));
+            }
+        }
+        int origTris = fine.triCount();
+        MomSurface mss;
+        mss.setup(fine, 2, 0, (float)f0, false);   // decimate + build RWG
+        fprintf(f, "      decimation: %d tris -> %d tris, %d unknowns\n",
+                origTris, mss.numTris(), mss.numUnknowns());
+        // the crash was a giant dense matrix; decimation must bound it. The
+        // full solve path is already exercised by the plate test above.
+        check(origTris > 2000 && mss.reducedFromTris() > 0 &&
+              mss.numTris() <= 2000 && mss.numUnknowns() > 0 &&
+              (double)mss.numUnknowns() * mss.numUnknowns() * 16.0 < 4.0e9,
+              "high-poly mesh auto-decimated to a tractable MoM size",
+              mss.numTris(), 2000.0);
+    }
+
     fprintf(f, "%s (%d failure%s)\n", failures ? "SELFTEST FAILED"
                                                : "SELFTEST PASSED",
             failures, failures == 1 ? "" : "s");

@@ -8,8 +8,67 @@
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
+#include <unordered_map>
 
 #pragma package(smart_init)
+
+//---------------------------------------------------------------------------
+void ClusterDecimate(const TriMesh &in, float cell, TriMesh &out)
+{
+    out.clear();
+    if (cell <= 0.0f || in.verts.empty())
+    {
+        out = in;
+        return;
+    }
+    double inv = 1.0 / cell;
+    auto key = [&](const Vec3 &p) -> long long
+    {
+        // pack three 21-bit cluster indices (offset to stay non-negative)
+        long long x = (long long)std::llround(p.x * inv) + 1048576;
+        long long y = (long long)std::llround(p.y * inv) + 1048576;
+        long long z = (long long)std::llround(p.z * inv) + 1048576;
+        x &= 0x1FFFFF; y &= 0x1FFFFF; z &= 0x1FFFFF;
+        return (x << 42) | (y << 21) | z;
+    };
+    std::unordered_map<long long, int> cmap;
+    std::vector<Vec3> accum;
+    std::vector<int>  cnt;
+    std::vector<int>  vmap(in.verts.size());
+    for (size_t i = 0; i < in.verts.size(); ++i)
+    {
+        long long k = key(in.verts[i]);
+        auto it = cmap.find(k);
+        if (it == cmap.end())
+        {
+            int id = (int)accum.size();
+            cmap[k] = id;
+            vmap[i] = id;
+            accum.push_back(in.verts[i]);
+            cnt.push_back(1);
+        }
+        else
+        {
+            vmap[i] = it->second;
+            accum[it->second] += in.verts[i];
+            cnt[it->second]++;
+        }
+    }
+    out.verts.resize(accum.size());
+    for (size_t i = 0; i < accum.size(); ++i)
+        out.verts[i] = accum[i] * (1.0f / cnt[i]);
+    for (size_t t = 0; t + 2 < in.idx.size(); t += 3)
+    {
+        int a = vmap[in.idx[t]], b = vmap[in.idx[t + 1]], c = vmap[in.idx[t + 2]];
+        if (a != b && b != c && a != c)
+        {
+            out.idx.push_back(a);
+            out.idx.push_back(b);
+            out.idx.push_back(c);
+        }
+    }
+    out.computeNormals();
+}
 
 //---------------------------------------------------------------------------
 // TriMesh
