@@ -293,7 +293,7 @@ bool TMainForm::computeGridPreview(VoxelGridSpec &g)
     if (f0 <= 0)
         return false;
     double lam = C0 / f0;
-    int cpl = std::max(8, std::min(80, (int)simValue(L"Cells per lambda", 20)));
+    int cpl = std::max(8, std::min(20000, (int)simValue(L"Cells per lambda", 20)));
     float dl = (float)(lam / cpl);
     int pad = std::max(4, std::min(80, (int)simValue(L"Padding (cells)", 12)));
 
@@ -380,7 +380,7 @@ void TMainForm::startSimulation()
     }
     double lam = C0 / f0;
     int cpl = (int)simValue(L"Cells per lambda", 20);
-    cpl = std::max(8, std::min(80, cpl));
+    cpl = std::max(8, std::min(20000, cpl));
     float dl = (float)(lam / cpl);
     int pad = (int)simValue(L"Padding (cells)", 12);
     pad = std::max(4, std::min(80, pad));
@@ -933,7 +933,7 @@ void __fastcall TMainForm::OnMeshClick(TObject *)
 
         const bool fdtd = (cbSolver->ItemIndex == 1);
         double bytesPerCell = fdtd ? 27.0 : 49.0;   // field arrays + masks
-        int cpl = std::max(8, std::min(80,
+        int cpl = std::max(8, std::min(20000,
                   (int)simValue(L"Cells per lambda", 20)));
         int spp = 2 * cpl;
         int autoSteps = 2 * (g.nx + g.ny + g.nz) + 3 * spp + 12 * spp;
