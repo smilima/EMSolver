@@ -422,6 +422,39 @@ void TGLView::drawScene()
         glEnd();
     }
 
+    // MoM wire currents (color each segment by |I|)
+    if (!wirePts.empty() && wireMag.size() * 2 == wirePts.size())
+    {
+        float norm = (wireNorm > 0.0f) ? wireNorm : 1.0f;
+        currentMax = 0.0f;
+        for (float v : wireMag)
+            currentMax = std::max(currentMax, v);
+        glDisable(GL_LIGHTING);
+        glLineWidth(4.0f);
+        glBegin(GL_LINES);
+        for (size_t s = 0; s < wireMag.size(); ++s)
+        {
+            float t;
+            if (dbScale)
+            {
+                float db = 20.0f * std::log10(std::max(wireMag[s],
+                              norm * 1e-7f) / norm);
+                t = (db + dbRange) / dbRange;
+            }
+            else
+                t = wireMag[s] / norm;
+            if (t > 1.0f) t = 1.0f;
+            float rgb[3];
+            JetColor(t, rgb);
+            glColor3f(rgb[0], rgb[1], rgb[2]);
+            const Vec3 &a = wirePts[s * 2], &b = wirePts[s * 2 + 1];
+            glVertex3f(a.x, a.y, a.z);
+            glVertex3f(b.x, b.y, b.z);
+        }
+        glEnd();
+        glLineWidth(1.0f);
+    }
+
     drawFieldPlane();
 }
 
@@ -447,6 +480,30 @@ void TGLView::setMeshEdges(const std::vector<Vec3> &segments)
 void TGLView::clearMeshEdges()
 {
     meshSegs.clear();
+    Invalidate();
+}
+
+void TGLView::setWireCurrents(const std::vector<Vec3> &pts,
+                              const std::vector<float> &mag)
+{
+    wirePts = pts;
+    wireMag = mag;
+    wireNorm = 0.0f;
+    if (!mag.empty())
+    {
+        std::vector<float> tmp = mag;
+        size_t kk = (size_t)(tmp.size() * 0.99);
+        if (kk >= tmp.size()) kk = tmp.size() - 1;
+        std::nth_element(tmp.begin(), tmp.begin() + kk, tmp.end());
+        wireNorm = tmp[kk];
+    }
+    Invalidate();
+}
+
+void TGLView::clearWireCurrents()
+{
+    wirePts.clear();
+    wireMag.clear();
     Invalidate();
 }
 

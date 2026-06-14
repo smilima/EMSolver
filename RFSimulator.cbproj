@@ -227,6 +227,14 @@
             <DependentOn>GpuFdtd.h</DependentOn>
             <BuildOrder>16</BuildOrder>
         </CppCompile>
+        <CppCompile Include="MomSolver.cpp">
+            <DependentOn>MomSolver.h</DependentOn>
+            <BuildOrder>17</BuildOrder>
+        </CppCompile>
+        <CppCompile Include="GpuMom.cpp">
+            <DependentOn>GpuMom.h</DependentOn>
+            <BuildOrder>18</BuildOrder>
+        </CppCompile>
         <CppCompile Include="MainUnit.cpp">
             <Form>MainForm</Form>
             <FormType>dfm</FormType>

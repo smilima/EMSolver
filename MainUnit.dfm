@@ -108,7 +108,8 @@ object MainForm: TMainForm
       Items.Strings = (
         'Solver: TLM (time domain)'
         'Solver: FDTD (time domain)'
-        'Solver: FEM (frequency)')
+        'Solver: FEM (frequency)'
+        'Solver: MoM (wire)')
     end
     object cbCurrents: TComboBox
       Left = 609

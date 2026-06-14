@@ -24,6 +24,7 @@
 #include "TlmSolver.h"
 #include "FdtdSolver.h"
 #include "FemSolver.h"
+#include "MomSolver.h"
 #include "GLView.h"
 #include "GifWriter.h"
 
@@ -130,7 +131,9 @@ private:        // User declarations
     // simulation (time-domain solvers run through the common interface)
     std::unique_ptr<IFieldSolver> solver;
     std::unique_ptr<FemSolver> femSolver;
+    std::unique_ptr<MomSolver> momSolver;
     bool                       usingFem      = false;
+    bool                       usingMom      = false;
     std::thread                solverThread;
     bool                       threadJoined  = true;
     bool                       dftLoaded     = false;
@@ -172,6 +175,7 @@ private:        // User declarations
     bool computeGridPreview(VoxelGridSpec &g);
     void updatePwMarker();
     void finishFemRun();
+    void finishMomRun();
     void updateMeshView();
     void voxelizeScene(const VoxelGridSpec &g, std::vector<uint8_t> &mat,
                        std::vector<MatProps> &table);

@@ -42,6 +42,11 @@ public:
     void setMeshEdges(const std::vector<Vec3> &segments);
     void clearMeshEdges();
 
+    // MoM wire currents: 'pts' = 2 points per segment, 'mag' = |I| per segment
+    void setWireCurrents(const std::vector<Vec3> &pts,
+                         const std::vector<float> &mag);
+    void clearWireCurrents();
+
     // synchronous framebuffer capture (RGB, top-down row order)
     bool captureFrame(std::vector<unsigned char> &rgb, int &w, int &h);
 
@@ -139,6 +144,11 @@ private:
 
     // FEM mesh wireframe
     std::vector<Vec3> meshSegs;
+
+    // MoM wire currents
+    std::vector<Vec3> wirePts;
+    std::vector<float> wireMag;
+    float wireNorm = 0.0f;
 };
 
 #endif

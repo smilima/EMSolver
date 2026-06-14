@@ -20,6 +20,7 @@
 #include "TlmSolver.h"
 #include "FdtdSolver.h"
 #include "FemSolver.h"
+#include "MomSolver.h"
 #include <cstdio>
 #include <cmath>
 #include <algorithm>
@@ -702,6 +703,82 @@ int RunSelfTest()
         {
             fprintf(f, "FAIL  could not build GPU comparison sims\n");
             ++failures;
+        }
+    }
+
+    // --- 10. MoM (thin-wire EFIE): half-wave dipole impedance ---
+    {
+        double f0 = 1e9, lam = C0 / f0;
+        SceneObject o = CreateAntenna(AntennaKind::Dipole, f0, {});
+        std::vector<std::vector<Vec3>> polys;
+        for (const auto &wseg : o.wires)
+            polys.push_back(wseg.pts);
+
+        MomSolver mom;
+        mom.setupWire(polys, o.feed.enabled, o.feed.a, o.feed.b,
+                      (float)(lam / 300.0), (float)f0, 40, false);
+        mom.run();
+        fprintf(f, "      MoM wire: %d segments, %d unknowns\n",
+                mom.numSegments(), mom.numUnknowns());
+        check(mom.numUnknowns() > 5, "MoM dipole assembled (unknowns > 5)",
+              mom.numUnknowns(), 0.0);
+        check(mom.zinValid(), "MoM dipole port impedance extracted",
+              mom.zinValid() ? 1.0 : 0.0, 0.0);
+        std::complex<double> zMomCpu(0, 0);
+        if (mom.zinValid())
+        {
+            zMomCpu = mom.zin();
+            fprintf(f, "      MoM dipole Zin = %.1f%+.1fj ohm (classic ~73+42j)\n",
+                    zMomCpu.real(), zMomCpu.imag());
+            check(zMomCpu.real() > 40.0 && zMomCpu.real() < 110.0,
+                  "MoM dipole resistance physical (40-110 ohm)",
+                  zMomCpu.real(), 73.0);
+            check(zMomCpu.imag() > -80.0 && zMomCpu.imag() < 130.0,
+                  "MoM dipole reactance physical (-80..130 ohm)",
+                  zMomCpu.imag(), 42.0);
+        }
+        // current distribution: max near the center feed, ~0 at the ends
+        std::vector<Vec3> wp;
+        std::vector<float> wm;
+        mom.getWireCurrents(wp, wm);
+        float mxC = 0, mxAll = 0, endAvg = 0; int nEnd = 0;
+        for (size_t s = 0; s < wm.size(); ++s)
+        {
+            float zc = std::fabs(wp[s*2].z + wp[s*2+1].z) * 0.5f;
+            mxAll = std::max(mxAll, wm[s]);
+            if (zc < 0.06f * (float)lam) mxC = std::max(mxC, wm[s]);
+            if (zc > 0.20f * (float)lam) { endAvg += wm[s]; ++nEnd; }
+        }
+        endAvg = nEnd ? endAvg / nEnd : 1e30f;
+        check(mxC > 1.5f * endAvg,
+              "MoM current max at feed, min at tips", mxC, endAvg);
+
+        FarFieldData ff;
+        bool ffOk = mom.computeFarField(ff);
+        check(ffOk && ff.directivity > 1.2f && ff.directivity < 2.2f,
+              "MoM dipole directivity ~1.64 (1.2-2.2)",
+              ffOk ? ff.directivity : 0.0f, 1.64);
+
+        // GPU MoM vs CPU MoM
+        MomSolver mg;
+        mg.setupWire(polys, o.feed.enabled, o.feed.a, o.feed.b,
+                     (float)(lam / 300.0), (float)f0, 40, true);
+        mg.run();
+        if (!mg.ranOnGpu())
+            fprintf(f, "SKIP  GPU MoM unavailable: %s\n", mg.gpuStatus().c_str());
+        else
+        {
+            fprintf(f, "      GPU MoM adapter: %s\n", mg.gpuStatus().c_str());
+            if (mg.zinValid() && mom.zinValid())
+            {
+                std::complex<double> zg = mg.zin();
+                double rel = std::abs(zg - zMomCpu) /
+                             std::max(1e-9, std::abs(zMomCpu));
+                fprintf(f, "      GPU MoM Zin = %.1f%+.1fj ohm (CPU %.1f%+.1fj)\n",
+                        zg.real(), zg.imag(), zMomCpu.real(), zMomCpu.imag());
+                check(rel < 0.05, "GPU MoM Zin matches CPU MoM (rel < 5%)",
+                      rel, 0.05);
+            }
         }
     }
 

@@ -205,11 +205,14 @@ void TMainForm::invalidateResults()
     dftLoaded = false;
     femSolver.reset();
     usingFem = false;
+    momSolver.reset();
+    usingMom = false;
     meshPreviewShown = false;
     glView->clearSurfaceData();
     glView->clearPlaneData();
     glView->clearPattern();
     glView->clearMeshEdges();
+    glView->clearWireCurrents();
     glView->setDomain(Aabb(), false);
     resetPlayback(false);
     updatePwMarker();
@@ -458,6 +461,72 @@ void TMainForm::startSimulation()
         }
     }
 
+    // ---- MoM (thin-wire EFIE) path ----
+    if (cbSolver->ItemIndex == 3)
+    {
+        if (planeWave)
+        {
+            MessageDlg(L"The wire MoM solver uses a wire-port (delta-gap) "
+                       L"feed. Switch the excitation to a wire port, or use "
+                       L"TLM/FDTD for plane waves.",
+                       mtInformation, TMsgDlgButtons() << mbOK, 0);
+            return;
+        }
+        std::vector<std::vector<Vec3>> polys;
+        bool momFeed = false;
+        Vec3 fa, fb;
+        for (const auto &e : objects)
+        {
+            for (const auto &w : e.obj.wires)
+            {
+                std::vector<Vec3> pl;
+                for (const auto &p : w.pts)
+                    pl.push_back(p + e.obj.position);
+                if (pl.size() >= 2)
+                    polys.push_back(pl);
+            }
+            if (!momFeed && e.obj.feed.enabled)
+            {
+                momFeed = true;
+                fa = e.obj.feed.a + e.obj.position;
+                fb = e.obj.feed.b + e.obj.position;
+            }
+        }
+        if (polys.empty() || !momFeed)
+        {
+            MessageDlg(L"The wire MoM solver needs a fed wire antenna "
+                       L"(dipole, Yagi, LPDA, helix, monopole). Surface "
+                       L"objects will be supported by the surface MoM.",
+                       mtInformation, TMsgDlgButtons() << mbOK, 0);
+            return;
+        }
+        usingMom = true;
+        usingFem = false;
+        momSolver.reset(new MomSolver());
+        int spl = std::max(20, cpl);
+        momSolver->setupWire(polys, momFeed, fa, fb, 0.0f, (float)f0, spl,
+                             chkGpu->Checked);
+        haveGrid  = false;
+        dftLoaded = false;
+        glView->clearPattern();
+        glView->clearSurfaceData();
+        glView->clearPlaneData();
+        glView->clearMeshEdges();
+        glView->clearWireCurrents();
+        glView->setDomain(Aabb(), false);
+        resetPlayback(false);
+        statusBar->Panels->Items[0]->Text = String().sprintf(
+            L"MoM: assembling wire mesh and solving at %.4g GHz...", f0 / 1e9);
+        MomSolver *ms = momSolver.get();
+        solverThread = std::thread([ms] { ms->run(); });
+        threadJoined = false;
+        btnRun->Enabled  = false;
+        btnStop->Enabled = true;
+        return;
+    }
+    usingMom = false;
+    momSolver.reset();
+
     // ---- FEM (frequency domain) path ----
     if (cbSolver->ItemIndex == 2)
     {
@@ -620,6 +689,8 @@ void TMainForm::stopSimulation(bool wait)
         solver->requestStop();
     if (femSolver)
         femSolver->requestStop();
+    if (momSolver)
+        momSolver->requestStop();
     if (wait)
         finishThread();
 }
@@ -639,8 +710,8 @@ void TMainForm::finishThread()
 //---------------------------------------------------------------------------
 void TMainForm::updateVisualization()
 {
-    if (usingFem)
-        return;             // FEM display is set once in finishFemRun()
+    if (usingFem || usingMom)
+        return;             // FEM/MoM display is set once on finish
     if (!solver || !haveGrid)
         return;
     if (playbackMode && solver->isFinished())
@@ -834,8 +905,56 @@ void TMainForm::finishFemRun()
 }
 
 //---------------------------------------------------------------------------
+void TMainForm::finishMomRun()
+{
+    btnRun->Enabled  = true;
+    btnStop->Enabled = false;
+    std::vector<Vec3> pts;
+    std::vector<float> mag;
+    momSolver->getWireCurrents(pts, mag);
+    glView->setWireCurrents(pts, mag);
+
+    String zs = L"no port";
+    if (momSolver->zinValid())
+    {
+        std::complex<double> z = momSolver->zin();
+        zs = String().sprintf(L"Zin = %.1f %s j%.1f ohm", z.real(),
+                              z.imag() < 0 ? L"-" : L"+", std::fabs(z.imag()));
+    }
+    String where = momSolver->ranOnGpu()
+        ? String().sprintf(L"GPU: %hs", momSolver->gpuStatus().c_str())
+        : String(L"CPU");
+    statusBar->Panels->Items[0]->Text = String().sprintf(
+        L"MoM (%s):  %s @ f0.  %d segments, %d unknowns. Far-field pattern "
+        L"available; wire color = |current|.",
+        where.c_str(), zs.c_str(), momSolver->numSegments(),
+        momSolver->numUnknowns());
+}
+
 void __fastcall TMainForm::OnTimerTick(TObject *)
 {
+    if (usingMom)
+    {
+        if (!momSolver)
+            return;
+        statusBar->Panels->Items[1]->Text = String().sprintf(
+            L"%hs  %d / %d", momSolver->phase().c_str(),
+            momSolver->currentStep(), momSolver->totalSteps());
+        statusBar->Panels->Items[2]->Text = String().sprintf(
+            L"Residual %.3g", (double)momSolver->residual());
+        if (momSolver->isFinished())
+        {
+            finishThread();
+            if (!dftLoaded)
+            {
+                dftLoaded = true;
+                finishMomRun();
+            }
+        }
+        statusBar->Panels->Items[3]->Text = String().sprintf(
+            L"|I|max %.3g", (double)glView->currentMax);
+        return;
+    }
     if (usingFem)
     {
         if (!femSolver)
@@ -1041,20 +1160,26 @@ void __fastcall TMainForm::OnViewOptionChanged(TObject *)
 //---------------------------------------------------------------------------
 void TMainForm::showPlots()
 {
-    if (usingFem)
+    if (usingFem || usingMom)
     {
-        if (femSolver && femSolver->isFinished() && femSolver->zinValid())
+        bool ok = usingFem ? (femSolver && femSolver->isFinished() &&
+                              femSolver->zinValid())
+                           : (momSolver && momSolver->isFinished() &&
+                              momSolver->zinValid());
+        if (ok)
         {
-            std::complex<double> z = femSolver->zin();
+            std::complex<double> z = usingFem ? femSolver->zin()
+                                              : momSolver->zin();
             MessageDlg(String().sprintf(
-                L"FEM is a single-frequency solve:\n\nZin(f0) = %.2f %s "
+                L"%s is a single-frequency solve:\n\nZin(f0) = %.2f %s "
                 L"j%.2f ohm\n\nFor S11/impedance sweeps and energy-vs-time, "
                 L"use the TLM solver with a Gaussian-sine excitation.",
+                usingFem ? L"FEM" : L"MoM",
                 z.real(), z.imag() < 0 ? L"-" : L"+", std::fabs(z.imag())),
                 mtInformation, TMsgDlgButtons() << mbOK, 0);
         }
         else
-            MessageDlg(L"Run the FEM solve first.", mtInformation,
+            MessageDlg(L"Run the solve first.", mtInformation,
                        TMsgDlgButtons() << mbOK, 0);
         return;
     }
@@ -1183,11 +1308,43 @@ void __fastcall TMainForm::OnFarFieldClick(TObject *)
         glView->clearPattern();
         return;
     }
+    if (usingMom)
+    {
+        if (!momSolver || !momSolver->isFinished())
+        {
+            MessageDlg(L"Run the MoM solve first.", mtInformation,
+                       TMsgDlgButtons() << mbOK, 0);
+            return;
+        }
+        Screen->Cursor = crHourGlass;
+        FarFieldData ffm;
+        bool okm = momSolver->computeFarField(ffm);
+        Screen->Cursor = crDefault;
+        if (!okm)
+        {
+            MessageDlg(L"No far-field data from the MoM run.", mtInformation,
+                       TMsgDlgButtons() << mbOK, 0);
+            return;
+        }
+        Aabb b;
+        std::vector<Vec3> pts; std::vector<float> mag;
+        momSolver->getWireCurrents(pts, mag);
+        for (const auto &p : pts) b.grow(p);
+        Vec3 center = b.valid() ? b.center() : Vec3(0, 0, 0);
+        float scale = b.valid() ? 0.6f * b.size().length() : 1.0f;
+        glView->setPattern(ffm, center, scale);
+        statusBar->Panels->Items[0]->Text = String().sprintf(
+            L"MoM far field:  D = %.2f dBi,  peak at theta=%.0f deg, "
+            L"phi=%.0f deg  (pattern radius: 30 dB range).",
+            10.0 * std::log10(std::max(1e-6f, ffm.directivity)),
+            ffm.peakThetaDeg, ffm.peakPhiDeg);
+        return;
+    }
     if (usingFem)
     {
-        MessageDlg(L"Far-field patterns currently require a TLM run (the "
-                   L"FEM solver does not record a Huygens surface yet).",
-                   mtInformation, TMsgDlgButtons() << mbOK, 0);
+        MessageDlg(L"Far-field patterns currently require a TLM/FDTD or MoM "
+                   L"run (the FEM solver does not record a Huygens surface "
+                   L"yet).", mtInformation, TMsgDlgButtons() << mbOK, 0);
         return;
     }
     if (!solver || !solver->isFinished())
