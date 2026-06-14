@@ -6,6 +6,7 @@
 
 #include "MainUnit.h"
 #include "ChartForm.h"
+#include "ProjectIO.h"
 #include <algorithm>
 #include <cmath>
 #include <complex>
@@ -1921,6 +1922,258 @@ void __fastcall TMainForm::OnPlayClick(TObject *)
     btnPlay->Caption = playing ? L"❚❚ Pause" : L"▶ Play";
     if (playing)
         playbackMode = true;
+}
+
+//---------------------------------------------------------------------------
+// Project save / load (.emsim) - persists the scene, settings, the displayed
+// result snapshot, and the plot pages so a model can be reopened without
+// recalculating.
+//---------------------------------------------------------------------------
+void TMainForm::saveProjectTo(const String &path)
+{
+    ProjectData d;
+
+    // simulation settings (every vleSim row)
+    for (int r = 0; r < vleSim->Strings->Count; ++r)
+    {
+        AnsiString k(vleSim->Strings->Names[r]);
+        AnsiString v(vleSim->Strings->ValueFromIndex[r]);
+        d.settings.push_back({ k.c_str(), v.c_str() });
+    }
+
+    // toolbar / view state
+    d.solverIdx     = cbSolver->ItemIndex;
+    d.excitationIdx = cbExcitation->ItemIndex;
+    d.waveformIdx   = cbWaveform->ItemIndex;
+    d.currentsIdx   = cbCurrents->ItemIndex;
+    d.dbRangeIdx    = cbDbRange->ItemIndex;
+    d.gpu           = chkGpu->Checked;
+    d.showModel     = chkModel->Checked;
+    d.dbScale       = chkDb->Checked;
+    d.planeOn       = chkPlane->Checked;
+    d.meshOn        = chkMesh->Checked;
+
+    // scene objects
+    for (const auto &e : objects)
+    {
+        ProjObject o;
+        o.kind         = e.obj.kind;
+        o.name         = e.obj.name;
+        o.position     = e.obj.position;
+        o.rotDeg       = e.obj.rotDeg;
+        o.dielectric   = e.obj.dielectric;
+        o.epsr         = e.obj.epsr;
+        o.sigma        = e.obj.sigma;
+        o.designFreqHz = e.obj.designFreqHz;
+        o.isStl        = e.isStl;
+        o.params       = e.obj.params;
+        if (e.isStl)
+        {
+            o.stlVerts.reserve(e.stlBase.verts.size() * 3);
+            for (const auto &v : e.stlBase.verts)
+            { o.stlVerts.push_back(v.x); o.stlVerts.push_back(v.y);
+              o.stlVerts.push_back(v.z); }
+            o.stlIdx = e.stlBase.idx;
+        }
+        d.objects.push_back(std::move(o));
+    }
+
+    // displayed result snapshot
+    d.result = glView->exportResult();
+
+    // plot pages
+    if (chartForm)
+    {
+        for (const auto &pg : chartForm->pages)
+        {
+            ProjPage pp;
+            pp.title  = AnsiString(pg.title).c_str();
+            pp.xLabel = AnsiString(pg.xLabel).c_str();
+            pp.yLabel = AnsiString(pg.yLabel).c_str();
+            for (const auto &c : pg.curves)
+            {
+                ProjCurve pc;
+                pc.name  = AnsiString(c.name).c_str();
+                pc.color = (unsigned)c.color;
+                pc.x = c.x; pc.y = c.y;
+                pp.curves.push_back(std::move(pc));
+            }
+            d.pages.push_back(std::move(pp));
+        }
+    }
+
+    if (!SaveProject(path.c_str(), d))
+    {
+        MessageDlg(L"Could not write the project file.", mtError,
+                   TMsgDlgButtons() << mbOK, 0);
+        return;
+    }
+    projectPath = path;
+    Caption = L"RF Simulator - " + ExtractFileName(path);
+    statusBar->Panels->Items[0]->Text =
+        L"Saved " + ExtractFileName(path);
+}
+
+//---------------------------------------------------------------------------
+bool TMainForm::loadProjectFrom(const String &path)
+{
+    ProjectData d;
+    std::string err;
+    if (!LoadProject(path.c_str(), d, err))
+    {
+        MessageDlg(String().sprintf(L"Could not open project: %hs",
+                   err.c_str()), mtError, TMsgDlgButtons() << mbOK, 0);
+        return false;
+    }
+
+    invalidateResults();    // stop any run, clear overlays
+    objects.clear();
+
+    // settings
+    for (const auto &kv : d.settings)
+        setSimValue(String(AnsiString(kv.first.c_str())),
+                    String(AnsiString(kv.second.c_str())));
+
+    // toolbar / view state
+    cbSolver->ItemIndex     = d.solverIdx;
+    cbExcitation->ItemIndex = d.excitationIdx;
+    cbWaveform->ItemIndex   = d.waveformIdx;
+    cbCurrents->ItemIndex   = d.currentsIdx;
+    cbDbRange->ItemIndex    = d.dbRangeIdx;
+    chkGpu->Checked         = d.gpu;
+    chkModel->Checked       = d.showModel;
+    chkDb->Checked          = d.dbScale;
+    chkPlane->Checked       = d.planeOn;
+    chkMesh->Checked        = d.meshOn;
+    glView->showModel = d.showModel;
+    glView->dbScale   = d.dbScale;
+    glView->dbRange   = 20.0f + 10.0f * std::max(0, d.dbRangeIdx);
+
+    // rebuild scene objects
+    for (const auto &po : d.objects)
+    {
+        ObjEntry e;
+        if (po.isStl)
+        {
+            e.isStl = true;
+            e.stlBase.verts.clear();
+            for (size_t k = 0; k + 2 < po.stlVerts.size(); k += 3)
+                e.stlBase.verts.push_back(
+                    Vec3(po.stlVerts[k], po.stlVerts[k + 1], po.stlVerts[k + 2]));
+            e.stlBase.idx = po.stlIdx;
+            e.stlBase.computeNormals();
+            e.obj.kind = (int)AntennaKind::ImportedStl;
+            double sc = GetParam(po.params, "Scale (m/unit)", 1.0);
+            e.obj.mesh = e.stlBase;
+            for (auto &v : e.obj.mesh.verts)
+                v *= (float)sc;
+            e.obj.mesh.computeNormals();
+            e.obj.params = po.params;
+        }
+        else
+        {
+            e.obj = CreateAntenna((AntennaKind)po.kind, po.designFreqHz,
+                                  po.params);
+        }
+        e.obj.kind         = po.kind;
+        e.obj.name         = po.name;
+        e.obj.dielectric   = po.dielectric;
+        e.obj.epsr         = po.epsr;
+        e.obj.sigma        = po.sigma;
+        e.obj.designFreqHz = po.designFreqHz;
+        // bake rotation (as on Apply), then translate
+        e.obj.rotDeg = po.rotDeg;
+        RotateSceneObject(e.obj, po.rotDeg);
+        e.obj.position = po.position;
+        objects.push_back(std::move(e));
+    }
+    refreshObjectList(objects.empty() ? -1 : 0);
+    updateSceneView();                 // draw the model first...
+    glView->importResult(d.result);    // ...then restore result overlays
+    glView->zoomExtents();
+    glView->Invalidate();
+
+    // restore plots
+    if (!d.pages.empty())
+    {
+        if (!chartForm)
+            chartForm = new TChartForm(this);
+        chartForm->pages.clear();
+        for (const auto &pp : d.pages)
+        {
+            TChartForm::Page pg;
+            pg.title  = String(AnsiString(pp.title.c_str()));
+            pg.xLabel = String(AnsiString(pp.xLabel.c_str()));
+            pg.yLabel = String(AnsiString(pp.yLabel.c_str()));
+            for (const auto &pc : pp.curves)
+            {
+                ChartCurve c;
+                c.name  = String(AnsiString(pc.name.c_str()));
+                c.color = (TColor)pc.color;
+                c.x = pc.x; c.y = pc.y;
+                pg.curves.push_back(std::move(c));
+            }
+            chartForm->pages.push_back(std::move(pg));
+        }
+        chartForm->refreshPages();
+        chartForm->Show();
+    }
+
+    projectPath = path;
+    Caption = L"RF Simulator - " + ExtractFileName(path);
+    statusBar->Panels->Items[0]->Text =
+        L"Opened " + ExtractFileName(path);
+    return true;
+}
+
+//---------------------------------------------------------------------------
+void __fastcall TMainForm::OnFileOpen(TObject *)
+{
+    std::unique_ptr<TOpenDialog> dlg(new TOpenDialog(this));
+    dlg->Filter  = L"RF Simulator project (*.emsim)|*.emsim|All files (*.*)|*.*";
+    dlg->DefaultExt = L"emsim";
+    dlg->Title   = L"Open project";
+    if (dlg->Execute())
+        loadProjectFrom(dlg->FileName);
+}
+
+//---------------------------------------------------------------------------
+void __fastcall TMainForm::OnFileSave(TObject *Sender)
+{
+    if (projectPath.IsEmpty())
+        OnFileSaveAs(Sender);
+    else
+        saveProjectTo(projectPath);
+}
+
+//---------------------------------------------------------------------------
+void __fastcall TMainForm::OnFileSaveAs(TObject *)
+{
+    std::unique_ptr<TSaveDialog> dlg(new TSaveDialog(this));
+    dlg->Filter  = L"RF Simulator project (*.emsim)|*.emsim|All files (*.*)|*.*";
+    dlg->DefaultExt = L"emsim";
+    dlg->Options << ofOverwritePrompt;
+    dlg->Title   = L"Save project as";
+    if (!projectPath.IsEmpty())
+        dlg->FileName = ExtractFileName(projectPath);
+    if (dlg->Execute())
+        saveProjectTo(dlg->FileName);
+}
+
+//---------------------------------------------------------------------------
+void __fastcall TMainForm::OnFileNew(TObject *)
+{
+    if (MessageDlg(L"Start a new project? Unsaved results will be lost.",
+                   mtConfirmation, TMsgDlgButtons() << mbYes << mbNo, 0) != mrYes)
+        return;
+    invalidateResults();
+    objects.clear();
+    refreshObjectList(-1);
+    updateSceneView();
+    glView->Invalidate();
+    projectPath = L"";
+    Caption = L"RF Simulator";
+    statusBar->Panels->Items[0]->Text = L"New project";
 }
 
 //---------------------------------------------------------------------------

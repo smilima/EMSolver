@@ -114,6 +114,10 @@ __published:    // IDE-managed Components
                                        System::LongInt ARow,
                                        const System::UnicodeString Value);
 	void __fastcall SaveAs2Click(TObject *Sender);
+    void __fastcall OnFileOpen(TObject *Sender);
+    void __fastcall OnFileSave(TObject *Sender);
+    void __fastcall OnFileSaveAs(TObject *Sender);
+    void __fastcall OnFileNew(TObject *Sender);
 
 private:        // User declarations
     // 3D viewport: custom OpenGL control (not IDE-registered), created at
@@ -183,6 +187,9 @@ private:        // User declarations
     void finishMomSurfRun();
     void finishSweep();
     void updateMeshView();
+    void saveProjectTo(const String &path);
+    bool loadProjectFrom(const String &path);
+    String projectPath;
     void voxelizeScene(const VoxelGridSpec &g, std::vector<uint8_t> &mat,
                        std::vector<MatProps> &table);
     bool meshPreviewShown = false;

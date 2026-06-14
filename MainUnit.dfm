@@ -503,20 +503,24 @@ object MainForm: TMainForm
     Top = 112
     object File1: TMenuItem
       Caption = 'File'
-      object File2: TMenuItem
-        Caption = 'Open'
-      end
       object Close1: TMenuItem
-        Caption = 'Close'
+        Caption = 'New'
+        OnClick = OnFileNew
+      end
+      object File2: TMenuItem
+        Caption = 'Open...'
+        OnClick = OnFileOpen
       end
       object N2: TMenuItem
         Caption = '-'
       end
       object Close2: TMenuItem
         Caption = 'Save'
+        OnClick = OnFileSave
       end
       object SaveAs1: TMenuItem
         Caption = 'Save As...'
+        OnClick = OnFileSaveAs
       end
       object N1: TMenuItem
         Caption = '-'

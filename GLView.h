@@ -10,11 +10,38 @@
 #include "TlmSolver.h"
 #include <vector>
 
+// Snapshot of everything shown in the viewport, for project save/load.
+struct GLResult
+{
+    std::vector<SurfaceFace> faces;
+    std::vector<float>       faceVals;
+    float                    faceDl = 0.0f;
+    std::vector<Vec3>        triV;
+    std::vector<int>         triIdx;
+    std::vector<float>       triMag;
+    std::vector<Vec3>        wirePts;
+    std::vector<float>       wireMag;
+    bool                     hasPlane = false;
+    VoxelGridSpec            planeGrid;
+    int                      planeAxis = -1, planeIdx = 0, planeN1 = 0, planeN2 = 0;
+    std::vector<float>       planeVals;
+    bool                     hasPattern = false;
+    FarFieldData             pattern;
+    Vec3                     patCenter;
+    float                    patScale = 1.0f;
+    Aabb                     domain;
+    bool                     domainVisible = false;
+    std::vector<Vec3>        probeMarkers;
+};
+
 class TGLView : public TCustomControl
 {
 public:
     __fastcall TGLView(TComponent *Owner);
     __fastcall virtual ~TGLView();
+
+    GLResult exportResult() const;     // capture current display for saving
+    void     importResult(const GLResult &r);  // restore a saved display
 
     // scene content ---------------------------------------------------------
     void setScene(const std::vector<SceneObject> &objs, int selected);

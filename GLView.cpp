@@ -118,6 +118,56 @@ void TGLView::setProbeMarkers(const std::vector<Vec3> &pts)
 }
 
 //---------------------------------------------------------------------------
+GLResult TGLView::exportResult() const
+{
+    GLResult r;
+    r.faces = faces; r.faceVals = faceVals; r.faceDl = faceDl;
+    r.triV = triCurV; r.triIdx = triCurIdx; r.triMag = triCurMag;
+    r.wirePts = wirePts; r.wireMag = wireMag;
+    if (planeAxis >= 0 && !planeVals.empty())
+    {
+        r.hasPlane = true; r.planeGrid = planeGrid; r.planeAxis = planeAxis;
+        r.planeIdx = planeIdx; r.planeN1 = planeN1; r.planeN2 = planeN2;
+        r.planeVals = planeVals;
+    }
+    if (!patU.empty())
+    {
+        r.hasPattern = true;
+        r.pattern.nTheta = patNTheta; r.pattern.nPhi = patNPhi;
+        r.pattern.U = patU; r.pattern.uMax = patUMax;
+        r.patCenter = patCenter; r.patScale = patScale;
+    }
+    r.domain = domain; r.domainVisible = domainVisible;
+    r.probeMarkers = probeMarkers;
+    return r;
+}
+
+//---------------------------------------------------------------------------
+void TGLView::importResult(const GLResult &r)
+{
+    clearSurfaceData();
+    clearTriCurrents();
+    clearWireCurrents();
+    clearPlaneData();
+    clearPattern();
+    clearMeshEdges();
+    if (!r.faceVals.empty())
+        setSurfaceData(r.faces, r.faceVals, r.faceDl);
+    if (!r.triMag.empty())
+        setTriCurrents(r.triV, r.triIdx, r.triMag);
+    if (!r.wireMag.empty())
+        setWireCurrents(r.wirePts, r.wireMag);
+    if (r.hasPlane)
+        setPlaneData(r.planeGrid, r.planeAxis, r.planeIdx, r.planeN1,
+                     r.planeN2, r.planeVals);
+    if (r.hasPattern)
+        setPattern(r.pattern, r.patCenter, r.patScale);
+    setDomain(r.domain, r.domainVisible);
+    setProbeMarkers(r.probeMarkers);
+    Invalidate();
+}
+
+//---------------------------------------------------------------------------
 void TGLView::setDomain(const Aabb &box, bool show)
 {
     domain = box;

@@ -22,6 +22,7 @@
 #include "FemSolver.h"
 #include "MomSolver.h"
 #include "MomSurface.h"
+#include "ProjectIO.h"
 #include <cstdio>
 #include <cmath>
 #include <algorithm>
@@ -949,6 +950,71 @@ int RunSelfTest()
                       "probe |E| spectrum peaks near f0", bestF/f0, 1.0);
             }
         }
+    }
+
+    // --- 15. Project save/load round-trips scene + result + plots ---
+    {
+        ProjectData a;
+        a.settings.push_back({ "Frequency (MHz)", "1000" });
+        a.settings.push_back({ "Cells per lambda", "20" });
+        a.solverIdx = 3; a.excitationIdx = 1; a.dbRangeIdx = 2;
+        a.gpu = true; a.showModel = false; a.planeOn = true;
+
+        ProjObject o; o.kind = 7; o.name = "TestStl"; o.isStl = true;
+        o.position = Vec3(0.1f, 0.2f, 0.3f); o.rotDeg = Vec3(10, 20, 30);
+        o.stlVerts = { 0,0,0, 1,0,0, 0,1,0 }; o.stlIdx = { 0,1,2 };
+        o.params.push_back({ "Scale (m/unit)", 0.001 });
+        a.objects.push_back(o);
+
+        ProjObject d2; d2.kind = 2; d2.name = "Dipole"; d2.designFreqHz = 2e9;
+        d2.params.push_back({ "Length (m)", 0.15 });
+        a.objects.push_back(d2);
+
+        a.result.wirePts = { Vec3(0,0,0), Vec3(0,0,1) };
+        a.result.wireMag = { 1.0f };
+        a.result.hasPattern = true;
+        a.result.pattern.nTheta = 3; a.result.pattern.nPhi = 4;
+        a.result.pattern.U.assign(12, 0.5f);
+        a.result.pattern.directivity = 1.64f;
+        a.result.domain.grow(Vec3(-1, -1, -1));
+        a.result.domain.grow(Vec3(1, 1, 1));
+        a.result.domainVisible = true;
+        a.result.probeMarkers = { Vec3(0.05f, 0, 0) };
+
+        ProjPage pg; pg.title = "S11"; pg.xLabel = "GHz"; pg.yLabel = "dB";
+        ProjCurve cv; cv.name = "S11"; cv.color = 0xFF0000u;
+        cv.x = { 1, 2, 3 }; cv.y = { -10, -20, -5 };
+        pg.curves.push_back(cv); a.pages.push_back(pg);
+
+        std::wstring tmp = L"selftest_proj.emsim";
+        bool wrote = SaveProject(tmp, a);
+        check(wrote, "project file written", wrote ? 1 : 0, 1);
+
+        ProjectData b; std::string err;
+        bool rd = LoadProject(tmp, b, err);
+        check(rd, "project file read back", rd ? 1 : 0, 1);
+        if (rd)
+        {
+            bool same =
+                b.objects.size() == 2 && b.pages.size() == 1 &&
+                b.solverIdx == 3 && b.excitationIdx == 1 && b.gpu &&
+                !b.showModel && b.planeOn &&
+                b.objects[0].isStl && b.objects[0].stlIdx.size() == 3 &&
+                b.objects[0].name == "TestStl" &&
+                std::fabs(b.objects[0].position.x - 0.1f) < 1e-6f &&
+                std::fabs(b.objects[1].designFreqHz - 2e9) < 1.0 &&
+                b.objects[1].params.size() == 1 &&
+                b.result.wirePts.size() == 2 && b.result.hasPattern &&
+                b.result.pattern.U.size() == 12 &&
+                b.result.probeMarkers.size() == 1 &&
+                b.result.domainVisible &&
+                b.pages[0].curves.size() == 1 &&
+                b.pages[0].curves[0].x.size() == 3 &&
+                b.pages[0].curves[0].color == 0xFF0000u;
+            check(same, "project round-trip preserved scene/result/plots",
+                  same ? 1 : 0, 1);
+        }
+        _wremove(tmp.c_str());
     }
 
     fprintf(f, "%s (%d failure%s)\n", failures ? "SELFTEST FAILED"
