@@ -17,17 +17,17 @@ object MainForm: TMainForm
   TextHeight = 15
   object splitter: TSplitter
     Left = 300
-    Top = 125
+    Top = 105
     Width = 5
-    Height = 663
+    Height = 683
     ExplicitTop = 96
     ExplicitHeight = 692
   end
   object topPanel: TPanel
     Left = 0
-    Top = 26
+    Top = 23
     Width = 1380
-    Height = 52
+    Height = 82
     Align = alTop
     BevelOuter = bvNone
     ShowCaption = False
@@ -42,21 +42,21 @@ object MainForm: TMainForm
     object lblExcitation: TLabel
       Left = 180
       Top = 6
-      Width = 55
+      Width = 54
       Height = 15
       Caption = 'Excitation:'
     end
     object lblSolver: TLabel
       Left = 426
       Top = 6
-      Width = 37
+      Width = 35
       Height = 15
       Caption = 'Solver:'
     end
     object lblDisplay: TLabel
       Left = 609
       Top = 6
-      Width = 44
+      Width = 41
       Height = 15
       Caption = 'Display:'
     end
@@ -183,8 +183,8 @@ object MainForm: TMainForm
       OnClick = OnViewOptionChanged
     end
     object chkGpu: TCheckBox
-      Left = 1078
-      Top = 6
+      Left = 8
+      Top = 53
       Width = 150
       Height = 17
       Caption = 'Use GPU (compute)'
@@ -193,15 +193,15 @@ object MainForm: TMainForm
   end
   object leftPanel: TPanel
     Left = 0
-    Top = 125
+    Top = 105
     Width = 300
-    Height = 663
+    Height = 683
     Align = alLeft
     BevelOuter = bvNone
     ShowCaption = False
     TabOrder = 1
-    ExplicitTop = 96
-    ExplicitHeight = 675
+    ExplicitTop = 74
+    ExplicitHeight = 697
     object lblComponents: TLabel
       Left = 0
       Top = 0
@@ -267,7 +267,7 @@ object MainForm: TMainForm
       Left = 0
       Top = 433
       Width = 300
-      Height = 230
+      Height = 250
       Align = alClient
       Strings.Strings = (
         'Frequency (MHz)=1000'
@@ -284,7 +284,7 @@ object MainForm: TMainForm
         'Setting'
         'Value')
       OnSetEditText = OnSimSettingEdited
-      ExplicitHeight = 242
+      ExplicitHeight = 264
       ColWidths = (
         150
         144)
@@ -292,16 +292,15 @@ object MainForm: TMainForm
   end
   object pnlView: TPanel
     Left = 305
-    Top = 125
+    Top = 105
     Width = 1075
-    Height = 663
+    Height = 683
     Align = alClient
     BevelOuter = bvNone
     ShowCaption = False
     TabOrder = 2
-    ExplicitTop = 96
-    ExplicitWidth = 1069
-    ExplicitHeight = 675
+    ExplicitTop = 160
+    ExplicitHeight = 628
   end
   object playPanel: TPanel
     Left = 0
@@ -384,11 +383,14 @@ object MainForm: TMainForm
     Left = 0
     Top = 0
     Width = 1380
-    Height = 26
+    Height = 23
     AutoSize = True
+    ButtonHeight = 23
+    ButtonWidth = 124
     Caption = 'ToolBar1'
     ShowCaptions = True
     TabOrder = 5
+    ExplicitWidth = 1374
     object btnAdd: TToolButton
       Left = 0
       Top = 0
@@ -397,47 +399,47 @@ object MainForm: TMainForm
       OnClick = OnAddClick
     end
     object btnImport: TToolButton
-      Left = 35
+      Left = 33
       Top = 0
       AutoSize = True
       Caption = 'Import STL...'
       OnClick = OnImportClick
     end
     object btnDelete: TToolButton
-      Left = 120
+      Left = 111
       Top = 0
       AutoSize = True
       Caption = 'Delete'
       OnClick = OnDeleteClick
     end
     object ToolSep1: TToolButton
-      Left = 170
+      Left = 155
       Top = 0
       Width = 8
       Style = tbsSeparator
     end
     object btnMesh: TToolButton
-      Left = 178
+      Left = 163
       Top = 0
       AutoSize = True
       Caption = 'Generate mesh'
       OnClick = OnMeshClick
     end
     object ToolSep2: TToolButton
-      Left = 275
+      Left = 253
       Top = 0
       Width = 8
       Style = tbsSeparator
     end
     object btnRun: TToolButton
-      Left = 283
+      Left = 261
       Top = 0
       AutoSize = True
       Caption = #9654' Run'
       OnClick = OnRunClick
     end
     object btnStop: TToolButton
-      Left = 333
+      Left = 306
       Top = 0
       AutoSize = True
       Caption = #9632' Stop'
@@ -445,40 +447,40 @@ object MainForm: TMainForm
       OnClick = OnStopClick
     end
     object ToolSep3: TToolButton
-      Left = 383
+      Left = 354
       Top = 0
       Width = 8
       Style = tbsSeparator
     end
     object btnPlots: TToolButton
-      Left = 391
+      Left = 362
       Top = 0
       AutoSize = True
       Caption = 'Plots (S11/Z/energy)...'
       OnClick = OnPlotsClick
     end
     object btnFarField: TToolButton
-      Left = 530
+      Left = 490
       Top = 0
       AutoSize = True
       Caption = 'Far-field pattern'
       OnClick = OnFarFieldClick
     end
     object btnRecGif: TToolButton
-      Left = 635
+      Left = 586
       Top = 0
       AutoSize = True
       Caption = #9679' Record GIF...'
       OnClick = OnRecGifClick
     end
     object ToolSep4: TToolButton
-      Left = 730
+      Left = 673
       Top = 0
       Width = 8
       Style = tbsSeparator
     end
     object btnZoom: TToolButton
-      Left = 738
+      Left = 681
       Top = 0
       AutoSize = True
       Caption = 'Zoom extents'

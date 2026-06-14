@@ -215,6 +215,18 @@
             <DependentOn>FdtdSolver.h</DependentOn>
             <BuildOrder>13</BuildOrder>
         </CppCompile>
+        <CppCompile Include="GpuCompute.cpp">
+            <DependentOn>GpuCompute.h</DependentOn>
+            <BuildOrder>14</BuildOrder>
+        </CppCompile>
+        <CppCompile Include="GpuFem.cpp">
+            <DependentOn>GpuFem.h</DependentOn>
+            <BuildOrder>15</BuildOrder>
+        </CppCompile>
+        <CppCompile Include="GpuFdtd.cpp">
+            <DependentOn>GpuFdtd.h</DependentOn>
+            <BuildOrder>16</BuildOrder>
+        </CppCompile>
         <CppCompile Include="MainUnit.cpp">
             <Form>MainForm</Form>
             <FormType>dfm</FormType>

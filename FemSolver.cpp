@@ -5,6 +5,7 @@
 #pragma hdrstop
 
 #include "FemSolver.h"
+#include "GpuFem.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -236,7 +237,7 @@ FemSolver::~FemSolver()
 void FemSolver::setup(const VoxelGridSpec &grid,
                       std::vector<uint8_t> materials,
                       std::vector<MatProps> table, float freq,
-                      const std::vector<size_t> &gap, int pol)
+                      const std::vector<size_t> &gap, int pol, bool gpu)
 {
     g        = grid;
     mat      = std::move(materials);
@@ -244,6 +245,9 @@ void FemSolver::setup(const VoxelGridSpec &grid,
     f0       = freq;
     gapCells = gap;
     polAxis  = pol;
+    useGpu   = gpu;
+    usedGpu  = false;
+    gpuMsg.clear();
     finished = false;
     running  = false;
     stopFlag = false;
@@ -265,8 +269,17 @@ void FemSolver::run()
     }
     if (ok && !stopFlag && nUnknowns > 0)
     {
-        phaseText = "solving (COCG)";
-        solveCocg();
+        usedGpu = false;
+        if (useGpu)
+        {
+            phaseText = "solving (COCG, GPU)";
+            usedGpu = RunGpuFemCocg(*this, gpuMsg);
+        }
+        if (!usedGpu)
+        {
+            phaseText = "solving (COCG)";
+            solveCocg();
+        }
         phaseText = "post-processing";
         postProcess();
     }

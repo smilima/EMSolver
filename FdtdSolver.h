@@ -19,6 +19,8 @@
 class FdtdSolver : public IFieldSolver
 {
 public:
+    friend bool RunGpuFdtd(FdtdSolver &s, std::string &msg);
+
     FdtdSolver();
     ~FdtdSolver();
 
@@ -33,7 +35,7 @@ public:
     int  currentStep()  const { return curStep; }
     int  totalSteps()   const { return config.totalSteps; }
     float currentEnergy() const { return energy; }
-    bool ranOnGpu()     const { return false; }
+    bool ranOnGpu()     const { return usedGpu; }
     const std::string &gpuStatus() const { return gpuMsg; }
     const wchar_t *solverName() const { return L"FDTD"; }
     const VoxelGridSpec &grid()  const { return g; }
@@ -143,6 +145,7 @@ private:
     std::atomic<int>     curStep{0};
     std::atomic<float>   energy{0.0f};
     std::string          gpuMsg;
+    bool                 usedGpu = false;
 
     float dt = 0.0f;
 };

@@ -29,10 +29,13 @@ public:
     // gapCells: carved feed cells (uniform E impressed along polAxis)
     void setup(const VoxelGridSpec &grid, std::vector<uint8_t> materials,
                std::vector<MatProps> matTable, float f0,
-               const std::vector<size_t> &gapCells, int polAxis);
+               const std::vector<size_t> &gapCells, int polAxis,
+               bool useGpu = false);
 
     void run();                 // mesh -> assemble -> solve -> post (worker)
     void requestStop()        { stopFlag = true; }
+    bool ranOnGpu()     const { return usedGpu; }
+    const std::string &gpuStatus() const { return gpuMsg; }
     bool isRunning()    const { return running; }
     bool isFinished()   const { return finished; }
     int  currentStep()  const { return curIter; }
@@ -63,6 +66,7 @@ public:
 
 private:
     using cplx = std::complex<double>;
+    friend bool RunGpuFemCocg(FemSolver &s, std::string &msg);
 
     void assemble();
     void solveCocg();
@@ -74,6 +78,9 @@ private:
     float                f0 = 1e9f;
     std::vector<size_t>  gapCells;
     int                  polAxis = 2;
+    bool                 useGpu = false;
+    bool                 usedGpu = false;
+    std::string          gpuMsg;
 
     FemMesh              mesh;
 

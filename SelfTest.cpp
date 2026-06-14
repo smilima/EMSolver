@@ -450,11 +450,15 @@ int RunSelfTest()
                   lastE, peakE);
 
             // impedance cross-check vs TLM at f0
+            std::complex<double> zFdtdCpu(0, 0);
+            bool zFdtdOk = false;
             const auto &ports = fd.ports();
             if (!ports.empty() && !ports[0].vRec.empty())
             {
                 std::complex<double> zF =
                     PortZ(ports[0], fd.timestep(), 1e9);
+                zFdtdCpu = zF;
+                zFdtdOk = true;
                 fprintf(f, "      FDTD Z(f0) = %.1f%+.1fj ohm,  TLM Z(f0) = "
                         "%.1f%+.1fj ohm\n", zF.real(), zF.imag(),
                         zTlmF0.real(), zTlmF0.imag());
@@ -501,6 +505,46 @@ int RunSelfTest()
                 check(std::fabs(ff.peakThetaDeg - 90.0f) < 30.0f,
                       "FDTD dipole beam broadside (theta 90 +/- 30 deg)",
                       ff.peakThetaDeg, 90.0);
+
+            // GPU FDTD vs CPU FDTD
+            FdtdSolver fg;
+            TlmConfig cfgG = cfg;
+            cfgG.useGpu = true;
+            fg.setup(dg.g, dg.mat, {}, cfgG);
+            fg.addPort(dg.gapCells, 2, 1.0f);
+            fg.run();
+            if (!fg.ranOnGpu())
+                fprintf(f, "SKIP  GPU FDTD unavailable: %s\n",
+                        fg.gpuStatus().c_str());
+            else
+            {
+                std::vector<int> gs;
+                std::vector<float> gv;
+                fg.getEnergyHistory(gs, gv);
+                float gpeak = 0.0f, glast = gv.empty() ? 1.0f : gv.back();
+                bool gfin = true;
+                for (float v : gv)
+                {
+                    if (!std::isfinite(v)) gfin = false;
+                    gpeak = std::max(gpeak, v);
+                }
+                fprintf(f, "      GPU FDTD adapter: %s\n", fg.gpuStatus().c_str());
+                check(gfin && gpeak > 0 && glast < 0.15f * gpeak,
+                      "GPU FDTD stable and absorbing", glast, gpeak);
+                const auto &gp = fg.ports();
+                if (zFdtdOk && !gp.empty() && !gp[0].vRec.empty())
+                {
+                    std::complex<double> zg = PortZ(gp[0], fg.timestep(), 1e9);
+                    double rel = std::abs(zg - zFdtdCpu) /
+                                 std::max(1e-9, std::abs(zFdtdCpu));
+                    fprintf(f, "      GPU FDTD Z(f0) = %.1f%+.1fj ohm "
+                            "(CPU %.1f%+.1fj)\n", zg.real(), zg.imag(),
+                            zFdtdCpu.real(), zFdtdCpu.imag());
+                    check(rel < 0.05,
+                          "GPU FDTD Z(f0) matches CPU FDTD (rel < 5%)",
+                          rel, 0.05);
+                }
+            }
         }
     }
 
@@ -521,6 +565,8 @@ int RunSelfTest()
             FemSolver fs;
             fs.setup(dg.g, dg.mat, {}, 1e9f, dg.gapCells, 2);
             fs.run();
+            std::complex<double> zFemCpu = fs.zin();
+            bool zFemCpuOk = fs.zinValid();
             fprintf(f, "      FEM mesh: %u nodes, %u tets, %u edges, "
                     "%u unknowns; %d iters, residual %.3g\n",
                     (unsigned)fs.numNodes(), (unsigned)fs.numTets(),
@@ -575,6 +621,32 @@ int RunSelfTest()
             check(avgC > 1.3 * avgT,
                   "FEM current max near feed (center > 1.3x tip)",
                   avgC, avgT);
+
+            // GPU FEM (COCG on the GPU) vs CPU FEM
+            FemSolver fg;
+            fg.setup(dg.g, dg.mat, {}, 1e9f, dg.gapCells, 2, true);
+            fg.run();
+            if (!fg.ranOnGpu())
+                fprintf(f, "SKIP  GPU FEM unavailable: %s\n",
+                        fg.gpuStatus().c_str());
+            else
+            {
+                fprintf(f, "      GPU FEM adapter: %s; %d iters, residual %.3g\n",
+                        fg.gpuStatus().c_str(), fg.currentStep(),
+                        (double)fg.residual());
+                check(fg.zinValid(), "GPU FEM port current extracted",
+                      fg.zinValid() ? 1.0 : 0.0, 0.0);
+                if (fg.zinValid() && zFemCpuOk)
+                {
+                    std::complex<double> zg = fg.zin();
+                    double rel = std::abs(zg - zFemCpu) /
+                                 std::max(1e-9, std::abs(zFemCpu));
+                    fprintf(f, "      GPU FEM Zin = %.1f%+.1fj ohm (CPU %.1f%+.1fj)\n",
+                            zg.real(), zg.imag(), zFemCpu.real(), zFemCpu.imag());
+                    check(rel < 0.05,
+                          "GPU FEM Zin matches CPU FEM (rel < 5%)", rel, 0.05);
+                }
+            }
         }
     }
 

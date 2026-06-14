@@ -5,6 +5,7 @@
 #pragma hdrstop
 
 #include "FdtdSolver.h"
+#include "GpuFdtd.h"
 #include <cmath>
 #include <cstring>
 #include <algorithm>
@@ -341,11 +342,17 @@ float FdtdSolver::waveformValue(int n) const
 //---------------------------------------------------------------------------
 void FdtdSolver::run()
 {
-    running = true;
-    for (int n = 0; n < config.totalSteps && !stopFlag; ++n)
+    running  = true;
+    usedGpu  = false;
+    if (config.useGpu)
+        usedGpu = RunGpuFdtd(*this, gpuMsg);
+    if (!usedGpu)
     {
-        step(n);
-        curStep = n + 1;
+        for (int n = 0; n < config.totalSteps && !stopFlag; ++n)
+        {
+            step(n);
+            curStep = n + 1;
+        }
     }
     finalizeDft();
     finished = true;

@@ -480,7 +480,7 @@ void TMainForm::startSimulation()
         usingFem = true;
         femSolver.reset(new FemSolver());
         femSolver->setup(g, std::move(mat), std::move(matTable), (float)f0,
-                         feedSets[0].cells, feedSets[0].pol);
+                         feedSets[0].cells, feedSets[0].pol, chkGpu->Checked);
         lastGrid = g;
         haveGrid = true;
         dftLoaded = false;
@@ -821,11 +821,14 @@ void TMainForm::finishFemRun()
                               z.imag() < 0 ? L"-" : L"+",
                               std::fabs(z.imag()));
     }
+    String where = femSolver->ranOnGpu()
+        ? String().sprintf(L"GPU: %hs", femSolver->gpuStatus().c_str())
+        : String(L"CPU");
     statusBar->Panels->Items[0]->Text = String().sprintf(
-        L"FEM %s:  %s @ f0.  Mesh: %u nodes, %u tets, %u edges "
+        L"FEM %s (%s):  %s @ f0.  Mesh: %u nodes, %u tets, %u edges "
         L"(%u unknowns), residual %.2g.",
         femSolver->converged() ? L"converged" : L"NOT fully converged",
-        zs.c_str(), (unsigned)femSolver->numNodes(),
+        where.c_str(), zs.c_str(), (unsigned)femSolver->numNodes(),
         (unsigned)femSolver->numTets(), (unsigned)femSolver->numEdges(),
         (unsigned)femSolver->numUnknowns(), (double)femSolver->residual());
 }
