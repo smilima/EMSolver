@@ -11,7 +11,7 @@
 #pragma package(smart_init)
 
 static const char     PROJ_MAGIC[8] = { 'E','M','S','I','M','\0','\0','\0' };
-static const uint32_t PROJ_VERSION  = 1;
+static const uint32_t PROJ_VERSION  = 2;   // v2 adds recorded playback frames
 
 //---------------------------------------------------------------------------
 namespace {
@@ -101,6 +101,21 @@ void rGLResult(Reader &r, GLResult &g)
     r.vpod(g.probeMarkers);
 }
 
+//---------------------------------------------------------------------------
+void wVizFrame(Writer &w, const VizFrame &fr)
+{
+    w.pod(fr.step); w.pod(fr.planeAxis); w.pod(fr.planeIdx);
+    w.pod(fr.planeN1); w.pod(fr.planeN2);
+    w.vpod(fr.js); w.vpod(fr.plane);
+}
+
+void rVizFrame(Reader &r, VizFrame &fr)
+{
+    r.pod(fr.step); r.pod(fr.planeAxis); r.pod(fr.planeIdx);
+    r.pod(fr.planeN1); r.pod(fr.planeN2);
+    r.vpod(fr.js); r.vpod(fr.plane);
+}
+
 } // namespace
 
 //---------------------------------------------------------------------------
@@ -145,6 +160,16 @@ bool SaveProject(const std::wstring &path, const ProjectData &d)
             w.str(c.name); w.pod(c.color); w.vpod(c.x); w.vpod(c.y);
         }
     }
+    // playback frames (v2)
+    uint8_t hpb = d.playback.valid ? 1 : 0; w.pod(hpb);
+    if (hpb)
+    {
+        w.pod(d.playback.grid); w.pod(d.playback.dt);
+        w.vpod(d.playback.faces);
+        uint32_t nf = (uint32_t)d.playback.frames.size(); w.pod(nf);
+        for (const auto &fr : d.playback.frames)
+            wVizFrame(w, fr);
+    }
     bool ok = w.ok;
     fclose(f);
     return ok;
@@ -160,7 +185,7 @@ bool LoadProject(const std::wstring &path, ProjectData &d, std::string &err)
     if (!r.ok || memcmp(magic, PROJ_MAGIC, 8) != 0)
     { fclose(f); err = "not an EMSIM project file"; return false; }
     uint32_t ver = 0; r.pod(ver);
-    if (ver != PROJ_VERSION)
+    if (ver < 1 || ver > PROJ_VERSION)
     { fclose(f); err = "unsupported project version"; return false; }
 
     d = ProjectData();
@@ -198,6 +223,23 @@ bool LoadProject(const std::wstring &path, ProjectData &d, std::string &err)
         pg.curves.resize(nc);
         for (auto &c : pg.curves)
         { c.name = r.str(); r.pod(c.color); r.vpod(c.x); r.vpod(c.y); }
+    }
+    // playback frames (v2+)
+    if (ver >= 2)
+    {
+        uint8_t hpb = 0; r.pod(hpb);
+        if (hpb)
+        {
+            d.playback.valid = true;
+            r.pod(d.playback.grid); r.pod(d.playback.dt);
+            r.vpod(d.playback.faces);
+            uint32_t nf = 0; r.pod(nf);
+            if (nf > 10000000u)
+            { fclose(f); err = "corrupt playback data"; return false; }
+            d.playback.frames.resize(nf);
+            for (auto &fr : d.playback.frames)
+                rVizFrame(r, fr);
+        }
     }
     bool ok = r.ok;
     fclose(f);

@@ -231,6 +231,10 @@ void TMainForm::invalidateResults()
     usingMomSurf = false;
     usingSweep = false;
     meshPreviewShown = false;
+    usingLoaded = false;
+    loadedFrames.clear();
+    loadedFaces.clear();
+    loadedDt = 0.0f;
     glView->clearSurfaceData();
     glView->clearPlaneData();
     glView->clearPattern();
@@ -1268,7 +1272,17 @@ void __fastcall TMainForm::OnTimerTick(TObject *)
         return;
     }
     if (!solver)
+    {
+        // loaded snapshot: animate the recorded frames if "Play" is active
+        if (usingLoaded && playing && tbPlayback->Enabled)
+        {
+            int next = tbPlayback->Position + 1;
+            if (next > tbPlayback->Max)
+                next = 0;
+            tbPlayback->Position = next;   // OnChange shows the frame
+        }
         return;
+    }
     int n = solver->currentStep(), tot = solver->totalSteps();
     statusBar->Panels->Items[1]->Text =
         String().sprintf(L"Step %d / %d", n, tot);
@@ -1437,6 +1451,8 @@ void __fastcall TMainForm::OnViewOptionChanged(TObject *)
     updateMeshView();
     if (solver)
         updateVisualization();
+    else if (usingLoaded)
+        showPlaybackFrame(tbPlayback->Position);   // keep the loaded result
     else
     {
         glView->clearSurfaceData();
@@ -1450,6 +1466,20 @@ void __fastcall TMainForm::OnViewOptionChanged(TObject *)
 //---------------------------------------------------------------------------
 void TMainForm::showPlots()
 {
+    // loaded snapshot: the plots were saved with the project, just re-show them
+    if (usingLoaded && !solver && !usingFem && !usingMom && !usingMomSurf)
+    {
+        if (chartForm && !chartForm->pages.empty())
+        {
+            chartForm->Show();
+            chartForm->BringToFront();
+        }
+        else
+            MessageDlg(L"This saved project has no stored plots.",
+                       mtInformation, TMsgDlgButtons() << mbOK, 0);
+        return;
+    }
+
     // surface MoM: run a monostatic RCS frequency sweep
     if (usingMomSurf)
     {
@@ -1866,13 +1896,59 @@ void TMainForm::captureGifFrame()
 
 //---------------------------------------------------------------------------
 // playback (frame scrubbing)
+//
+// Frames can come from a live solver (after a run) or from a loaded .emsim
+// snapshot (no solver). These helpers hide which source is active so the
+// scrubbing/animation code is identical in both cases.
+//---------------------------------------------------------------------------
+int TMainForm::playbackFrameCount()
+{
+    if (solver)     return solver->frameCount();
+    if (usingLoaded) return (int)loadedFrames.size();
+    return 0;
+}
+
+//---------------------------------------------------------------------------
+bool TMainForm::playbackGetFrame(int idx, VizFrame &out)
+{
+    if (solver)
+        return solver->getFrame(idx, out);
+    if (usingLoaded && idx >= 0 && idx < (int)loadedFrames.size())
+    {
+        out = loadedFrames[idx];
+        return true;
+    }
+    return false;
+}
+
+//---------------------------------------------------------------------------
+const std::vector<SurfaceFace> &TMainForm::playbackFaces()
+{
+    static const std::vector<SurfaceFace> empty;
+    if (solver)      return solver->faces();
+    if (usingLoaded) return loadedFaces;
+    return empty;
+}
+
+//---------------------------------------------------------------------------
+float TMainForm::playbackDt()
+{
+    return solver ? solver->timestep() : loadedDt;
+}
+
+//---------------------------------------------------------------------------
+bool TMainForm::playbackReady()
+{
+    return (solver && solver->isFinished()) || usingLoaded;
+}
+
 //---------------------------------------------------------------------------
 void TMainForm::resetPlayback(bool enable)
 {
     playing = false;
     playbackMode = false;
     btnPlay->Caption = L"▶ Play";
-    int fc = (enable && solver) ? solver->frameCount() : 0;
+    int fc = enable ? playbackFrameCount() : 0;
     updatingSlider = true;
     tbPlayback->Max = std::max(0, fc - 1);
     tbPlayback->Position = tbPlayback->Max;
@@ -1887,27 +1963,28 @@ void TMainForm::resetPlayback(bool enable)
 //---------------------------------------------------------------------------
 void TMainForm::showPlaybackFrame(int idx)
 {
-    if (!solver || !haveGrid)
+    if (!haveGrid)
         return;
     VizFrame fr;
-    if (!solver->getFrame(idx, fr))
+    if (!playbackGetFrame(idx, fr))
         return;
-    glView->setSurfaceData(solver->faces(), fr.js, lastGrid.dl);
+    glView->setSurfaceData(playbackFaces(), fr.js, lastGrid.dl);
     if (fr.planeAxis >= 0 && !fr.plane.empty())
         glView->setPlaneData(lastGrid, fr.planeAxis, fr.planeIdx,
                              fr.planeN1, fr.planeN2, fr.plane);
     else
         glView->clearPlaneData();
-    float tNs = fr.step * solver->timestep() * 1e9f;
+    float tNs = fr.step * playbackDt() * 1e9f;
     lblFrame->Caption = String().sprintf(
         L"frame %d / %d   step %d   t = %.3f ns  ",
-        idx + 1, solver->frameCount(), fr.step, (double)tNs);
+        idx + 1, playbackFrameCount(), fr.step, (double)tNs);
+    glView->Invalidate();
 }
 
 //---------------------------------------------------------------------------
 void __fastcall TMainForm::OnPlaybackChange(TObject *)
 {
-    if (updatingSlider || !solver || !solver->isFinished())
+    if (updatingSlider || !playbackReady())
         return;
     playbackMode = true;
     showPlaybackFrame(tbPlayback->Position);
@@ -1916,7 +1993,7 @@ void __fastcall TMainForm::OnPlaybackChange(TObject *)
 //---------------------------------------------------------------------------
 void __fastcall TMainForm::OnPlayClick(TObject *)
 {
-    if (!solver || !solver->isFinished() || solver->frameCount() < 2)
+    if (!playbackReady() || playbackFrameCount() < 2)
         return;
     playing = !playing;
     btnPlay->Caption = playing ? L"❚❚ Pause" : L"▶ Play";
@@ -1980,6 +2057,34 @@ void TMainForm::saveProjectTo(const String &path)
 
     // displayed result snapshot
     d.result = glView->exportResult();
+
+    // recorded playback frames, so the scrubber replays the run after load
+    bool haveLiveFrames = solver && solver->isFinished() &&
+                          solver->frameCount() > 0;
+    if (haveGrid && (haveLiveFrames || (usingLoaded && !loadedFrames.empty())))
+    {
+        d.playback.valid = true;
+        d.playback.grid  = lastGrid;
+        if (haveLiveFrames)
+        {
+            d.playback.dt    = solver->timestep();
+            d.playback.faces = solver->faces();
+            int fc = solver->frameCount();
+            d.playback.frames.reserve(fc);
+            for (int i = 0; i < fc; ++i)
+            {
+                VizFrame fr;
+                if (solver->getFrame(i, fr))
+                    d.playback.frames.push_back(std::move(fr));
+            }
+        }
+        else    // re-saving a project that was itself loaded from disk
+        {
+            d.playback.dt     = loadedDt;
+            d.playback.faces  = loadedFaces;
+            d.playback.frames = loadedFrames;
+        }
+    }
 
     // plot pages
     if (chartForm)
@@ -2119,10 +2224,27 @@ bool TMainForm::loadProjectFrom(const String &path)
         chartForm->Show();
     }
 
+    // restore recorded playback frames so the scrubber replays the run
+    int loadedFrameCount = 0;
+    if (d.playback.valid && !d.playback.frames.empty())
+    {
+        loadedFrames = std::move(d.playback.frames);
+        loadedFaces  = std::move(d.playback.faces);
+        lastGrid     = d.playback.grid;
+        loadedDt     = d.playback.dt;
+        haveGrid     = true;
+        usingLoaded  = true;
+        loadedFrameCount = (int)loadedFrames.size();
+        resetPlayback(true);
+    }
+
     projectPath = path;
     Caption = L"RF Simulator - " + ExtractFileName(path);
-    statusBar->Panels->Items[0]->Text =
-        L"Opened " + ExtractFileName(path);
+    statusBar->Panels->Items[0]->Text = loadedFrameCount > 1
+        ? String().sprintf(L"Opened %s  -  %d playback frames restored, "
+                           L"drag the slider to replay",
+                           ExtractFileName(path).c_str(), loadedFrameCount)
+        : String(L"Opened ") + ExtractFileName(path);
     return true;
 }
 

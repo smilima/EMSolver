@@ -986,6 +986,22 @@ int RunSelfTest()
         cv.x = { 1, 2, 3 }; cv.y = { -10, -20, -5 };
         pg.curves.push_back(cv); a.pages.push_back(pg);
 
+        // recorded playback frames (v2 format)
+        a.playback.valid = true;
+        a.playback.grid.nx = 4; a.playback.grid.ny = 5; a.playback.grid.nz = 6;
+        a.playback.grid.dl = 0.01f;
+        a.playback.dt = 1.2e-12f;
+        SurfaceFace sf; sf.airCell = 3; sf.center = Vec3(0.1f, 0.2f, 0.3f);
+        sf.axis = 1; sf.sign = -1;
+        a.playback.faces.push_back(sf);
+        a.playback.faces.push_back(sf);
+        VizFrame vf0; vf0.step = 0; vf0.js = { 1.0f, 2.0f }; vf0.planeAxis = -1;
+        VizFrame vf1; vf1.step = 4; vf1.js = { 3.0f, 4.0f };
+        vf1.planeAxis = 1; vf1.planeIdx = 2; vf1.planeN1 = 4; vf1.planeN2 = 6;
+        vf1.plane.assign(24, 0.5f);
+        a.playback.frames.push_back(vf0);
+        a.playback.frames.push_back(vf1);
+
         std::wstring tmp = L"selftest_proj.emsim";
         bool wrote = SaveProject(tmp, a);
         check(wrote, "project file written", wrote ? 1 : 0, 1);
@@ -1010,11 +1026,68 @@ int RunSelfTest()
                 b.result.domainVisible &&
                 b.pages[0].curves.size() == 1 &&
                 b.pages[0].curves[0].x.size() == 3 &&
-                b.pages[0].curves[0].color == 0xFF0000u;
+                b.pages[0].curves[0].color == 0xFF0000u &&
+                b.playback.valid && b.playback.frames.size() == 2 &&
+                b.playback.faces.size() == 2 &&
+                b.playback.grid.nx == 4 && b.playback.grid.nz == 6 &&
+                std::fabs(b.playback.dt / 1.2e-12f - 1.0f) < 1e-5f &&
+                b.playback.frames[1].step == 4 &&
+                b.playback.frames[1].js.size() == 2 &&
+                b.playback.frames[1].planeAxis == 1 &&
+                b.playback.frames[1].plane.size() == 24;
             check(same, "project round-trip preserved scene/result/plots",
                   same ? 1 : 0, 1);
         }
         _wremove(tmp.c_str());
+    }
+
+    // --- 16. Recorded TLM frames survive a real save/load round-trip ---
+    {
+        TestSim ts;
+        if (BuildDipoleSim(ts, WaveformType::GaussianSine, 0, false, false))
+        {
+            ts.solver->setRecordEvery(20);
+            ts.solver->run();
+            int fc = ts.solver->frameCount();
+            check(fc > 1, "TLM run recorded playback frames", fc, 1.0);
+
+            ProjectData a;
+            a.playback.valid = true;
+            a.playback.grid  = ts.solver->grid();
+            a.playback.dt    = ts.solver->timestep();
+            a.playback.faces = ts.solver->faces();
+            for (int i = 0; i < fc; ++i)
+            {
+                VizFrame fr;
+                if (ts.solver->getFrame(i, fr))
+                    a.playback.frames.push_back(fr);
+            }
+            int mid = fc / 2;
+            VizFrame ref = a.playback.frames.empty() ? VizFrame()
+                                                     : a.playback.frames[mid];
+
+            std::wstring tmp = L"selftest_frames.emsim";
+            bool wrote = SaveProject(tmp, a);
+            ProjectData b; std::string err;
+            bool rd = wrote && LoadProject(tmp, b, err);
+            check(rd, "frame project written and read", rd ? 1 : 0, 1);
+            if (rd)
+            {
+                bool faceOk = b.playback.faces.size() == ts.solver->faces().size();
+                bool cntOk  = (int)b.playback.frames.size() == fc;
+                bool jsOk = cntOk &&
+                            b.playback.frames[mid].js.size() == ref.js.size();
+                double maxdiff = 0;
+                if (jsOk)
+                    for (size_t q = 0; q < ref.js.size(); ++q)
+                        maxdiff = std::max(maxdiff, (double)std::fabs(
+                            b.playback.frames[mid].js[q] - ref.js[q]));
+                check(faceOk && cntOk && jsOk && maxdiff == 0.0,
+                      "loaded frames bit-match the recorded TLM run",
+                      maxdiff, 0.0);
+            }
+            _wremove(tmp.c_str());
+        }
     }
 
     fprintf(f, "%s (%d failure%s)\n", failures ? "SELFTEST FAILED"

@@ -31,6 +31,18 @@ struct ProjObject
 struct ProjCurve { std::string name; unsigned color = 0; std::vector<double> x, y; };
 struct ProjPage  { std::string title, xLabel, yLabel; std::vector<ProjCurve> curves; };
 
+// Recorded time-domain playback: every VizFrame plus the surface faces and
+// grid needed to render them, so the frame scrubber works after load with no
+// live solver.
+struct ProjPlayback
+{
+    bool                     valid = false;
+    VoxelGridSpec            grid;
+    float                    dt = 0.0f;     // timestep (s) -> frame time labels
+    std::vector<SurfaceFace> faces;         // js[f] maps to faces[f]
+    std::vector<VizFrame>    frames;
+};
+
 struct ProjectData
 {
     std::vector<std::pair<std::string, std::string>> settings;  // vleSim rows
@@ -41,6 +53,7 @@ struct ProjectData
     std::vector<ProjObject> objects;
     GLResult result;                 // the displayed result snapshot
     std::vector<ProjPage> pages;     // saved plots
+    ProjPlayback playback;           // recorded frames for the scrubber
 };
 
 bool SaveProject(const std::wstring &path, const ProjectData &d);

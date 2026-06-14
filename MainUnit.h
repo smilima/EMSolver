@@ -161,6 +161,13 @@ private:        // User declarations
     bool           playing        = false;
     bool           updatingSlider = false;
 
+    // loaded playback store: set when a saved result is displayed with no live
+    // solver, so the frame scrubber replays recorded frames from a .emsim file
+    bool                     usingLoaded = false;
+    std::vector<VizFrame>    loadedFrames;
+    std::vector<SurfaceFace> loadedFaces;
+    float                    loadedDt    = 0.0f;
+
     // helpers
     void refreshObjectList(int select);
     void refreshPropEditor();
@@ -190,6 +197,12 @@ private:        // User declarations
     void saveProjectTo(const String &path);
     bool loadProjectFrom(const String &path);
     String projectPath;
+    // playback source abstraction (live solver or loaded snapshot)
+    int   playbackFrameCount();
+    bool  playbackGetFrame(int idx, VizFrame &out);
+    const std::vector<SurfaceFace> &playbackFaces();
+    float playbackDt();
+    bool  playbackReady();
     void voxelizeScene(const VoxelGridSpec &g, std::vector<uint8_t> &mat,
                        std::vector<MatProps> &table);
     bool meshPreviewShown = false;
