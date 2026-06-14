@@ -25,6 +25,7 @@ const wchar_t *AntennaKindName(AntennaKind k)
     case AntennaKind::Plate:       return L"PEC plate";
     case AntennaKind::Box:         return L"PEC box";
     case AntennaKind::Sphere:      return L"PEC sphere";
+    case AntennaKind::Probe:       return L"E-field probe";
     case AntennaKind::ImportedStl: return L"Imported STL";
     default:                       return L"Component";
     }

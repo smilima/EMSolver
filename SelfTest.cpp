@@ -909,6 +909,48 @@ int RunSelfTest()
               mxX, mxZ);
     }
 
+    // --- 14. E-field probe records a field history peaking at f0 ---
+    {
+        TestSim ts;
+        if (BuildDipoleSim(ts, WaveformType::CwRamped, 0, false, false))
+        {
+            double f0 = 1e9, lam = C0 / f0;
+            int pidx = ts.solver->addProbe(Vec3(0.06f*(float)lam, 0, 0));
+            check(pidx == 0, "E-field probe added inside the grid", pidx, 0.0);
+            ts.solver->run();
+            if (ts.solver->probeCount() > 0)
+            {
+                const FieldProbe &pb = ts.solver->probe(0);
+                int M = (int)pb.ex.size();
+                double mx = 0;
+                for (int n = 0; n < M; ++n)
+                    mx = std::max(mx, std::sqrt((double)pb.ex[n]*pb.ex[n] +
+                        (double)pb.ey[n]*pb.ey[n] + (double)pb.ez[n]*pb.ez[n]));
+                check(M > 100 && mx > 0.0,
+                      "probe recorded a nonzero field history", mx, 0.0);
+                double dtv = ts.solver->timestep();
+                double bestF = 0, bestMag = 0;
+                for (int q = 1; q <= 200; ++q)
+                {
+                    double fq = 1.5e9 * q / 200;
+                    std::complex<double> Ex(0,0), Ey(0,0), Ez(0,0);
+                    double w = 2.0*M_PI*fq*dtv;
+                    for (int n = 0; n < M; ++n)
+                    {
+                        std::complex<double> e(std::cos(w*n), -std::sin(w*n));
+                        Ex += (double)pb.ex[n]*e; Ey += (double)pb.ey[n]*e;
+                        Ez += (double)pb.ez[n]*e;
+                    }
+                    double mag = std::sqrt(std::norm(Ex)+std::norm(Ey)+std::norm(Ez));
+                    if (mag > bestMag) { bestMag = mag; bestF = fq; }
+                }
+                fprintf(f, "      probe spectral peak at %.3f GHz\n", bestF/1e9);
+                check(std::fabs(bestF - f0)/f0 < 0.1,
+                      "probe |E| spectrum peaks near f0", bestF/f0, 1.0);
+            }
+        }
+    }
+
     fprintf(f, "%s (%d failure%s)\n", failures ? "SELFTEST FAILED"
                                                : "SELFTEST PASSED",
             failures, failures == 1 ? "" : "s");

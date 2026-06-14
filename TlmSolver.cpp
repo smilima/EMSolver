@@ -284,6 +284,7 @@ void TlmSolver::setup(const VoxelGridSpec &grid, std::vector<uint8_t> materials,
 
     sources.clear();
     portList.clear();
+    probes.clear();
     frames.clear();
     energySteps.clear();
     energyVals.clear();
@@ -373,6 +374,23 @@ int TlmSolver::addPort(const std::vector<size_t> &cells, int polAxis, float amp)
 }
 
 //---------------------------------------------------------------------------
+int TlmSolver::addProbe(const Vec3 &worldPos)
+{
+    int i, j, k;
+    g.cellOf(worldPos, i, j, k);
+    if (!g.inGrid(i, j, k))
+        return -1;
+    FieldProbe pr;
+    pr.cell = g.cellIndex(i, j, k);
+    pr.pos  = worldPos;
+    pr.ex.reserve(config.totalSteps);
+    pr.ey.reserve(config.totalSteps);
+    pr.ez.reserve(config.totalSteps);
+    probes.push_back(std::move(pr));
+    return (int)probes.size() - 1;
+}
+
+//---------------------------------------------------------------------------
 void TlmSolver::addPlaneWave(int propAxis, int planeIndex, int polAxis, float amp)
 {
     for (int k = 0; k < g.nz; ++k)
@@ -422,8 +440,12 @@ void TlmSolver::run()
 {
     running = true;
     usedGpu = false;
-    if (config.useGpu)
+    // probes record per-step E in the CPU monitors; the GPU loop does not,
+    // so a run with probes uses the CPU path.
+    if (config.useGpu && probes.empty())
         usedGpu = RunGpuTlm(*this, gpuMsg);
+    else if (config.useGpu)
+        gpuMsg = "CPU (E-field probes record on the CPU path)";
     if (!usedGpu)
         runCpu();
     finalizeDft();
@@ -678,6 +700,16 @@ void TlmSolver::monitors(int n)
             }
             p.vRec.push_back(vSum);
             p.iRec.push_back(iVal);
+        }
+
+        // ---- E-field probes (E_j = -V_j/dl per component) ----
+        for (auto &pr : probes)
+        {
+            const float *vp = &V[pr.cell * 12];
+            float inv = -1.0f / g.dl;
+            pr.ex.push_back(inv * VjOf(vp, 0));
+            pr.ey.push_back(inv * VjOf(vp, 1));
+            pr.ez.push_back(inv * VjOf(vp, 2));
         }
 
         // ---- field cut plane (|E|, arbitrary units) ----

@@ -53,6 +53,9 @@ public:
                         const std::vector<float> &triMag);
     void clearTriCurrents();
 
+    // E-field probe markers (world positions)
+    void setProbeMarkers(const std::vector<Vec3> &pts);
+
     // synchronous framebuffer capture (RGB, top-down row order)
     bool captureFrame(std::vector<unsigned char> &rgb, int &w, int &h);
 
@@ -117,6 +120,7 @@ private:
     std::vector<DispMesh> meshes;
     std::vector<DispWire> wires;
     std::vector<Vec3>     feedMarkers;
+    std::vector<Vec3>     probeMarkers;
 
     Aabb  domain;
     bool  domainVisible = false;

@@ -131,6 +131,15 @@ struct VizFrame
     int planeAxis = -1, planeIdx = 0, planeN1 = 0, planeN2 = 0;
 };
 
+// E-field probe: records the 3 field components at a point every time step
+// (relative units; the source amplitude sets the scale).
+struct FieldProbe
+{
+    size_t cell = 0;
+    Vec3   pos;
+    std::vector<float> ex, ey, ez;
+};
+
 //---------------------------------------------------------------------------
 // Common interface for the time-domain field solvers (TLM, FDTD). The UI
 // drives any of them through this: same setup, monitors, playback, ports,
@@ -176,6 +185,10 @@ public:
     virtual bool getFrame(int idx, VizFrame &out) = 0;
     virtual void getEnergyHistory(std::vector<int> &steps,
                                   std::vector<float> &vals) = 0;
+    // E-field probe at a world point; returns its index (-1 if outside)
+    virtual int  addProbe(const Vec3 &worldPos) = 0;
+    virtual int  probeCount() const = 0;
+    virtual const FieldProbe &probe(int idx) const = 0;
 };
 
 // Far-field transform from accumulated Huygens phasors (8 floats per face:
@@ -241,6 +254,11 @@ public:
     // total link-line energy history, sampled every 16 steps
     void getEnergyHistory(std::vector<int> &steps, std::vector<float> &vals);
 
+    // E-field probes
+    int  addProbe(const Vec3 &worldPos);
+    int  probeCount() const { return (int)probes.size(); }
+    const FieldProbe &probe(int idx) const { return probes[idx]; }
+
     // Self tests
     static float ScatterUnitarityError();              // air node
     static float DielScatterUnitarityError(float epsr); // stub-loaded node
@@ -269,6 +287,7 @@ private:
     std::vector<float>   Vs;           // 3 capacitive stub pulses (diel only)
     std::vector<SourceCell> sources;   // plain soft sources (plane wave)
     std::vector<TlmPort> portList;
+    std::vector<FieldProbe> probes;
     std::vector<SurfaceFace> surfFaces;
 
     // surface current monitors

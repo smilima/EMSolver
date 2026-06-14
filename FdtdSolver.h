@@ -53,6 +53,9 @@ public:
     int  frameCount();
     bool getFrame(int idx, VizFrame &out);
     void getEnergyHistory(std::vector<int> &steps, std::vector<float> &vals);
+    int  addProbe(const Vec3 &worldPos);
+    int  probeCount() const { return (int)probes.size(); }
+    const FieldProbe &probe(int idx) const { return probes[idx]; }
 
 private:
     void step(int n);
@@ -119,6 +122,7 @@ private:
 
     std::vector<SourceCell> sources;
     std::vector<TlmPort> portList;
+    std::vector<FieldProbe> probes;
     std::vector<SurfaceFace> surfFaces;
 
     std::vector<float>   jsInstant, jsDftRe, jsDftIm, jsDftMag;

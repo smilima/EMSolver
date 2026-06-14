@@ -103,6 +103,7 @@ void FdtdSolver::setup(const VoxelGridSpec &grid,
 
     sources.clear();
     portList.clear();
+    probes.clear();
     frames.clear();
     energySteps.clear();
     energyVals.clear();
@@ -294,6 +295,23 @@ int FdtdSolver::addPort(const std::vector<size_t> &cells, int polAxis,
 }
 
 //---------------------------------------------------------------------------
+int FdtdSolver::addProbe(const Vec3 &worldPos)
+{
+    int i, j, k;
+    g.cellOf(worldPos, i, j, k);
+    if (!g.inGrid(i, j, k))
+        return -1;
+    FieldProbe pr;
+    pr.cell = g.cellIndex(i, j, k);
+    pr.pos  = worldPos;
+    pr.ex.reserve(config.totalSteps);
+    pr.ey.reserve(config.totalSteps);
+    pr.ez.reserve(config.totalSteps);
+    probes.push_back(std::move(pr));
+    return (int)probes.size() - 1;
+}
+
+//---------------------------------------------------------------------------
 void FdtdSolver::addPlaneWave(int propAxis, int planeIndex, int polAxis,
                               float amp)
 {
@@ -344,8 +362,10 @@ void FdtdSolver::run()
 {
     running  = true;
     usedGpu  = false;
-    if (config.useGpu)
+    if (config.useGpu && probes.empty())
         usedGpu = RunGpuFdtd(*this, gpuMsg);
+    else if (config.useGpu)
+        gpuMsg = "CPU (E-field probes record on the CPU path)";
     if (!usedGpu)
     {
         for (int n = 0; n < config.totalSteps && !stopFlag; ++n)
@@ -762,6 +782,16 @@ void FdtdSolver::monitors(int n)
             }
             p.vRec.push_back(vSum);
             p.iRec.push_back(iVal);
+        }
+
+        // E-field probes (cell-centered E)
+        for (auto &pr : probes)
+        {
+            int co[3];
+            cellCo((int)pr.cell, co);
+            pr.ex.push_back(eAt(co[0], co[1], co[2], 0));
+            pr.ey.push_back(eAt(co[0], co[1], co[2], 1));
+            pr.ez.push_back(eAt(co[0], co[1], co[2], 2));
         }
 
         // field cut plane (|E|)

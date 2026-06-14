@@ -21,6 +21,7 @@ enum class AntennaKind
     Plate,
     Box,
     Sphere,
+    Probe,
     ImportedStl,
     Count
 };

@@ -250,10 +250,16 @@ void TMainForm::invalidateResults()
 void TMainForm::updateSceneView()
 {
     std::vector<SceneObject> tmp;
+    std::vector<Vec3> probePts;
     tmp.reserve(objects.size());
     for (const auto &e : objects)
+    {
         tmp.push_back(e.obj);
+        if (e.obj.kind == (int)AntennaKind::Probe)
+            probePts.push_back(e.obj.position);
+    }
     glView->setScene(tmp, selectedIndex());
+    glView->setProbeMarkers(probePts);
     updatePwMarker();
 }
 
@@ -398,7 +404,11 @@ void TMainForm::startSimulation()
 
     Aabb sb;
     for (const auto &e : objects)
+    {
         sb.grow(e.obj.worldBounds());
+        if (e.obj.kind == (int)AntennaKind::Probe)
+            sb.grow(e.obj.position);   // keep probe points inside the domain
+    }
     if (!sb.valid())
         return;
 
@@ -749,6 +759,11 @@ void TMainForm::startSimulation()
         for (const auto &fs : feedSets)
             solver->addPort(fs.cells, fs.pol, 1.0f);
     }
+
+    // E-field probes
+    for (const auto &e : objects)
+        if (e.obj.kind == (int)AntennaKind::Probe)
+            solver->addProbe(e.obj.position);
 
     // |E| cut plane through the scene center
     if (chkPlane->Checked)
@@ -1598,6 +1613,68 @@ void TMainForm::showPlots()
         pgZ.curves.push_back({ L"Re Z", fGhz, reZ, (TColor)0x000000CC });
         pgZ.curves.push_back({ L"Im Z", fGhz, imZ, (TColor)0x00CC0000 });
         chartForm->pages.push_back(pgZ);
+    }
+
+    // ---- E-field probes: time waveform + |E| spectrum ----
+    int np = solver->probeCount();
+    if (np > 0)
+    {
+        const double dtv = solver->timestep();
+        const double f0  = solver->cfg().f0;
+        double fHi = 2.5 * f0;
+        switch (solver->cfg().waveform)
+        {
+        case WaveformType::CwRamped: fHi = 1.5 * f0; break;
+        default: break;
+        }
+        const int nF = 241;
+        for (int pi = 0; pi < np; ++pi)
+        {
+            const FieldProbe &pb = solver->probe(pi);
+            int M = (int)pb.ex.size();
+            if (M < 2)
+                continue;
+            // time waveform of |E|
+            std::vector<double> tNs(M), emag(M);
+            for (int n = 0; n < M; ++n)
+            {
+                tNs[n]  = n * dtv * 1e9;
+                emag[n] = std::sqrt((double)pb.ex[n]*pb.ex[n] +
+                                    (double)pb.ey[n]*pb.ey[n] +
+                                    (double)pb.ez[n]*pb.ez[n]);
+            }
+            TChartForm::Page pw;
+            pw.title  = String().sprintf(L"Probe %d |E| vs time", pi + 1);
+            pw.xLabel = L"Time (ns)";
+            pw.yLabel = L"|E|  (rel.)";
+            pw.curves.push_back({ L"|E|", tNs, emag, (TColor)0x00B0007F });
+            chartForm->pages.push_back(pw);
+
+            // |E| spectrum
+            std::vector<double> fGz(nF), spec(nF);
+            for (int q = 0; q < nF; ++q)
+            {
+                double f = fHi * (q + 1) / nF;
+                std::complex<double> Ex(0,0), Ey(0,0), Ez(0,0);
+                double w = 2.0 * M_PI * f * dtv;
+                for (int n = 0; n < M; ++n)
+                {
+                    std::complex<double> e(std::cos(w*n), -std::sin(w*n));
+                    Ex += (double)pb.ex[n] * e;
+                    Ey += (double)pb.ey[n] * e;
+                    Ez += (double)pb.ez[n] * e;
+                }
+                fGz[q]  = f / 1e9;
+                spec[q] = std::sqrt(std::norm(Ex)+std::norm(Ey)+std::norm(Ez))
+                          * 2.0 / M;
+            }
+            TChartForm::Page ps;
+            ps.title  = String().sprintf(L"Probe %d |E| spectrum", pi + 1);
+            ps.xLabel = L"Frequency (GHz)";
+            ps.yLabel = L"|E(f)|  (rel.)";
+            ps.curves.push_back({ L"|E|", fGz, spec, (TColor)0x00B0007F });
+            chartForm->pages.push_back(ps);
+        }
     }
 
     if (chartForm->pages.empty())

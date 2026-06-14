@@ -111,6 +111,13 @@ void TGLView::setScene(const std::vector<SceneObject> &objs, int selected)
 }
 
 //---------------------------------------------------------------------------
+void TGLView::setProbeMarkers(const std::vector<Vec3> &pts)
+{
+    probeMarkers = pts;
+    Invalidate();
+}
+
+//---------------------------------------------------------------------------
 void TGLView::setDomain(const Aabb &box, bool show)
 {
     domain = box;
@@ -403,6 +410,29 @@ void TGLView::drawScene()
     for (const auto &p : feedMarkers)
         glVertex3f(p.x, p.y, p.z);
     glEnd();
+
+    // E-field probe markers (cyan crosshair)
+    if (!probeMarkers.empty())
+    {
+        glColor3f(0.2f, 0.95f, 1.0f);
+        glPointSize(11.0f);
+        glBegin(GL_POINTS);
+        for (const auto &p : probeMarkers)
+            glVertex3f(p.x, p.y, p.z);
+        glEnd();
+        glLineWidth(1.5f);
+        glBegin(GL_LINES);
+        for (const auto &p : probeMarkers)
+        {
+            // small 3D crosshair so it is visible against geometry
+            float s = 0.04f * camDist;
+            glVertex3f(p.x - s, p.y, p.z); glVertex3f(p.x + s, p.y, p.z);
+            glVertex3f(p.x, p.y - s, p.z); glVertex3f(p.x, p.y + s, p.z);
+            glVertex3f(p.x, p.y, p.z - s); glVertex3f(p.x, p.y, p.z + s);
+        }
+        glEnd();
+        glLineWidth(1.0f);
+    }
 
     drawSurfaceFaces();
     if (domainVisible)
