@@ -13,6 +13,39 @@
 #pragma package(smart_init)
 
 //---------------------------------------------------------------------------
+void RotateSceneObject(SceneObject &o, const Vec3 &degXYZ)
+{
+    if (std::fabs(degXYZ.x) < 1e-6f && std::fabs(degXYZ.y) < 1e-6f &&
+        std::fabs(degXYZ.z) < 1e-6f)
+        return;
+    const float d2r = (float)(M_PI / 180.0);
+    float cx = std::cos(degXYZ.x*d2r), sx = std::sin(degXYZ.x*d2r);
+    float cy = std::cos(degXYZ.y*d2r), sy = std::sin(degXYZ.y*d2r);
+    float cz = std::cos(degXYZ.z*d2r), sz = std::sin(degXYZ.z*d2r);
+    // R = Rz * Ry * Rx
+    auto rot = [&](const Vec3 &p) -> Vec3
+    {
+        // Rx
+        Vec3 a(p.x, cx*p.y - sx*p.z, sx*p.y + cx*p.z);
+        // Ry
+        Vec3 b(cy*a.x + sy*a.z, a.y, -sy*a.x + cy*a.z);
+        // Rz
+        return Vec3(cz*b.x - sz*b.y, sz*b.x + cz*b.y, b.z);
+    };
+    for (auto &v : o.mesh.verts)
+        v = rot(v);
+    o.mesh.computeNormals();
+    for (auto &w : o.wires)
+        for (auto &p : w.pts)
+            p = rot(p);
+    if (o.feed.enabled)
+    {
+        o.feed.a = rot(o.feed.a);
+        o.feed.b = rot(o.feed.b);
+    }
+}
+
+//---------------------------------------------------------------------------
 void ClusterDecimate(const TriMesh &in, float cell, TriMesh &out)
 {
     out.clear();

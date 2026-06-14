@@ -824,6 +824,12 @@ int RunSelfTest()
         check(axial, "RWG plate scatters specularly along z (theta ~0/180)",
               ffOk ? ff.peakThetaDeg : -1.0f, 0.0);
 
+        double rcs = ms.monostaticRcsM2();
+        fprintf(f, "      plate monostatic RCS = %.4g m^2 (%.1f dBsm)\n",
+                rcs, 10.0 * std::log10(std::max(1e-12, rcs)));
+        check(std::isfinite(rcs) && rcs > 0.0,
+              "plate monostatic RCS positive and finite", rcs, 0.0);
+
         // GPU surface MoM vs CPU
         MomSurface mg;
         mg.setup(plate, 2, 0, (float)f0, true);
@@ -884,6 +890,23 @@ int RunSelfTest()
               (double)mss.numUnknowns() * mss.numUnknowns() * 16.0 < 4.0e9,
               "high-poly mesh auto-decimated to a tractable MoM size",
               mss.numTris(), 2000.0);
+    }
+
+    // --- 13. object rotation (place an antenna at any orientation) ---
+    {
+        double f0 = 1e9, lam = C0 / f0;
+        SceneObject d = CreateAntenna(AntennaKind::Dipole, f0, {});
+        RotateSceneObject(d, Vec3(0, 90, 0));   // z-dipole -> along x
+        float mxX = 0, mxZ = 0;
+        for (const auto &w : d.wires)
+            for (const auto &p : w.pts)
+            {
+                mxX = std::max(mxX, std::fabs(p.x));
+                mxZ = std::max(mxZ, std::fabs(p.z));
+            }
+        check(mxX > 0.1f * (float)lam && mxZ < 0.02f * (float)lam,
+              "rotation reorients a z-dipole to x (90 deg about Y)",
+              mxX, mxZ);
     }
 
     fprintf(f, "%s (%d failure%s)\n", failures ? "SELFTEST FAILED"

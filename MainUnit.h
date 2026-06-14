@@ -137,6 +137,7 @@ private:        // User declarations
     bool                       usingFem      = false;
     bool                       usingMom      = false;
     bool                       usingMomSurf  = false;
+    bool                       usingSweep    = false;
     std::thread                solverThread;
     bool                       threadJoined  = true;
     bool                       dftLoaded     = false;
@@ -180,6 +181,7 @@ private:        // User declarations
     void finishFemRun();
     void finishMomRun();
     void finishMomSurfRun();
+    void finishSweep();
     void updateMeshView();
     void voxelizeScene(const VoxelGridSpec &g, std::vector<uint8_t> &mat,
                        std::vector<MatProps> &table);

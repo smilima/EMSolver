@@ -446,6 +446,91 @@ void MomSurface::run()
 }
 
 //---------------------------------------------------------------------------
+// monostatic radar cross section (m^2): backscatter toward the source.
+// sigma = (k^2 eta^2 / 4pi) |N_perp|^2 with unit incident amplitude.
+//---------------------------------------------------------------------------
+double MomSurface::monostaticRcsM2() const
+{
+    if (N == 0 || J.empty())
+        return 0.0;
+    const double k = 2.0 * M_PI * f0 / C0;
+    const double eta = 376.730313;
+    int nt = (int)triA.size();
+    std::vector<cplx> mx(nt,0), my(nt,0), mz(nt,0);
+    for (int m = 0; m < N; ++m)
+    {
+        const Rwg &M = rwg[m];
+        int t[2] = { M.triP, M.triM };
+        Vec3 vf[2] = { M.vP, M.vM };
+        double sg[2] = { +1.0, -1.0 };
+        for (int s = 0; s < 2; ++s)
+        {
+            Vec3 rc = triC[t[s]];
+            double cf = M.len * sg[s] * 0.5;   // (len/(2A))*sg*A
+            Vec3 rho = rc - vf[s];
+            mx[t[s]] += J[m]*(cf*rho.x);
+            my[t[s]] += J[m]*(cf*rho.y);
+            mz[t[s]] += J[m]*(cf*rho.z);
+        }
+    }
+    Vec3 rh(0,0,0);
+    rh.set(propAxis, -1.0f);            // backscatter = -incidence
+    cplx Nx(0,0), Ny(0,0), Nz(0,0);
+    for (int t = 0; t < nt; ++t)
+    {
+        double phase = k*(rh.x*triC[t].x + rh.y*triC[t].y + rh.z*triC[t].z);
+        cplx e = std::exp(cplx(0, phase));
+        Nx += mx[t]*e; Ny += my[t]*e; Nz += mz[t]*e;
+    }
+    cplx Ndr = Nx*(double)rh.x + Ny*(double)rh.y + Nz*(double)rh.z;
+    double nperp2 = std::norm(Nx)+std::norm(Ny)+std::norm(Nz) - std::norm(Ndr);
+    if (nperp2 < 0) nperp2 = 0;
+    return (k*k*eta*eta/(4.0*M_PI)) * nperp2;
+}
+
+//---------------------------------------------------------------------------
+void MomSurface::runRcsSweep(const std::vector<float> &freqs)
+{
+    running  = true;
+    finished = false;
+    stopFlag = false;
+    sweepFreqs = freqs;
+    sweepRcs.assign(freqs.size(), 0.0);
+    maxStep = (int)freqs.size();
+    curStep = 0;
+    for (size_t i = 0; i < freqs.size() && !stopFlag; ++i)
+    {
+        f0 = freqs[i];
+        phaseText = "sweep: excitation";
+        excite();
+        usedGpu = false;
+        if (useGpu)
+        {
+            phaseText = "sweep: fill + solve (GPU)";
+            usedGpu = RunGpuMomSurf(*this, gpuMsg);
+        }
+        if (!usedGpu)
+        {
+            phaseText = "sweep: fill + solve (CPU)";
+            fillCpu();
+            solveCpu();
+        }
+        sweepRcs[i] = monostaticRcsM2();
+        curStep = (int)i + 1;
+    }
+    postProcess();        // leave the last frequency's currents displayable
+    phaseText = "sweep done";
+    finished = true;
+    running  = false;
+}
+
+void MomSurface::getSweep(std::vector<float> &freqs, std::vector<double> &rcs)
+{
+    freqs = sweepFreqs;
+    rcs   = sweepRcs;
+}
+
+//---------------------------------------------------------------------------
 void MomSurface::getTriCurrents(std::vector<Vec3> &v, std::vector<int> &idx,
                                 std::vector<float> &mag)
 {

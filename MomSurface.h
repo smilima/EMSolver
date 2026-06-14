@@ -53,6 +53,15 @@ public:
     bool computeFarField(FarFieldData &out, int nTheta = 37, int nPhi = 73);
     float matrixSymmetryError();   // |Z - Z^T| / |Z|, for self test
 
+    // monostatic RCS (m^2) at the current frequency and incidence direction
+    double monostaticRcsM2() const;
+
+    // RCS frequency sweep: re-fill + re-solve at each frequency (reusing the
+    // RWG mesh), storing monostatic RCS. Run on a worker thread.
+    void runRcsSweep(const std::vector<float> &freqs);
+    void getSweep(std::vector<float> &freqs, std::vector<double> &rcsM2);
+    int  sweepTotal() const { return (int)sweepFreqs.size(); }
+
 private:
     friend bool RunGpuMomSurf(MomSurface &s, std::string &msg);
     using cplx = std::complex<double>;
@@ -83,6 +92,8 @@ private:
 
     std::vector<cplx> Z, V, J;
     std::vector<float> triMag;
+    std::vector<float>  sweepFreqs;
+    std::vector<double> sweepRcs;
 
     ThreadPool *pool = nullptr;
     std::atomic<bool> stopFlag{false};

@@ -280,7 +280,10 @@ object MainForm: TMainForm
         'Boundary rho=0'
         'PW prop axis (0..2)=0'
         'PW pol axis (0..2)=2'
-        'Cut plane axis=1')
+        'Cut plane axis=1'
+        'RCS sweep f1 (MHz)=10'
+        'RCS sweep f2 (MHz)=40'
+        'RCS sweep points=16')
       TabOrder = 3
       TitleCaptions.Strings = (
         'Setting'

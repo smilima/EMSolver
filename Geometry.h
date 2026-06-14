@@ -60,6 +60,7 @@ struct SceneObject
     std::vector<Wire> wires;
     Feed              feed;
     Vec3              position;         // translation applied to all geometry
+    Vec3              rotDeg;            // local rotation (deg) about X,Y,Z
     float             designFreqHz = 1e9f; // the frequency it was generated for
     int               kind = 0;          // AntennaKind it was built from (UI use)
     std::vector<std::pair<std::string, double>> params; // editable parameters
@@ -162,5 +163,9 @@ void BuildVoxelOutline(const VoxelGridSpec &g,
 // weld coincident clusters, drop degenerate triangles. Coarsens a dense
 // mesh (e.g. a high-poly STL) to a size suitable for surface MoM.
 void ClusterDecimate(const TriMesh &in, float cell, TriMesh &out);
+
+// Rotate an object's geometry (mesh, wires, feed) in place about its local
+// origin by Euler angles in degrees (applied X then Y then Z).
+void RotateSceneObject(SceneObject &o, const Vec3 &degXYZ);
 
 #endif

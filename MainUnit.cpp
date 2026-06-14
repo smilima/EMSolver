@@ -146,6 +146,9 @@ void TMainForm::refreshPropEditor()
         vleProps->InsertRow(L"Pos X (m)", FmtD(o.position.x), true);
         vleProps->InsertRow(L"Pos Y (m)", FmtD(o.position.y), true);
         vleProps->InsertRow(L"Pos Z (m)", FmtD(o.position.z), true);
+        vleProps->InsertRow(L"Rot X (deg)", FmtD(o.rotDeg.x), true);
+        vleProps->InsertRow(L"Rot Y (deg)", FmtD(o.rotDeg.y), true);
+        vleProps->InsertRow(L"Rot Z (deg)", FmtD(o.rotDeg.z), true);
         if (!objects[i].isStl)
             vleProps->InsertRow(L"Design freq (MHz)", FmtD(o.designFreqHz / 1e6), true);
         for (const auto &p : o.params)
@@ -165,13 +168,17 @@ void TMainForm::applyProperties()
     Vec3 pos((float)ParseD(vleProps->Values[L"Pos X (m)"], e.obj.position.x),
              (float)ParseD(vleProps->Values[L"Pos Y (m)"], e.obj.position.y),
              (float)ParseD(vleProps->Values[L"Pos Z (m)"], e.obj.position.z));
+    Vec3 rot((float)ParseD(vleProps->Values[L"Rot X (deg)"], e.obj.rotDeg.x),
+             (float)ParseD(vleProps->Values[L"Rot Y (deg)"], e.obj.rotDeg.y),
+             (float)ParseD(vleProps->Values[L"Rot Z (deg)"], e.obj.rotDeg.z));
 
     // collect parameter rows back
     std::vector<std::pair<std::string, double>> params;
     for (int r = 0; r < vleProps->Strings->Count; ++r)
     {
         String key = vleProps->Strings->Names[r];
-        if (key.Pos(L"Pos ") == 1 || key.Pos(L"Design freq") == 1)
+        if (key.Pos(L"Pos ") == 1 || key.Pos(L"Rot ") == 1 ||
+            key.Pos(L"Design freq") == 1)
             continue;
         AnsiString ak(key);
         params.push_back({ ak.c_str(),
@@ -198,6 +205,9 @@ void TMainForm::applyProperties()
         e.obj = CreateAntenna((AntennaKind)e.obj.kind, f0, params);
         e.obj.name = keepName;
     }
+    // bake the rotation into the (freshly rebuilt) geometry, then translate
+    e.obj.rotDeg = rot;
+    RotateSceneObject(e.obj, rot);
     e.obj.position = pos;
     refreshPropEditor();
     updateSceneView();
@@ -218,6 +228,7 @@ void TMainForm::invalidateResults()
     usingMom = false;
     momSurf.reset();
     usingMomSurf = false;
+    usingSweep = false;
     meshPreviewShown = false;
     glView->clearSurfaceData();
     glView->clearPlaneData();
@@ -1119,8 +1130,65 @@ void TMainForm::finishMomSurfRun()
         momSurf->numUnknowns());
 }
 
+void TMainForm::finishSweep()
+{
+    usingSweep = false;
+    btnRun->Enabled  = true;
+    btnStop->Enabled = false;
+    std::vector<float> fr;
+    std::vector<double> rcs;
+    momSurf->getSweep(fr, rcs);
+    if (fr.size() < 2)
+    {
+        statusBar->Panels->Items[0]->Text = L"RCS sweep produced no data.";
+        return;
+    }
+    std::vector<double> fGhz(fr.size()), dbsm(fr.size());
+    double pk = -1e30; double pkF = 0;
+    for (size_t i = 0; i < fr.size(); ++i)
+    {
+        fGhz[i] = fr[i] / 1e9;
+        dbsm[i] = 10.0 * std::log10(std::max(1e-12, rcs[i]));
+        if (dbsm[i] > pk) { pk = dbsm[i]; pkF = fr[i] / 1e6; }
+    }
+    if (!chartForm)
+        chartForm = new TChartForm(this);
+    chartForm->pages.clear();
+    TChartForm::Page pg;
+    pg.title  = L"Monostatic RCS vs frequency";
+    pg.xLabel = L"Frequency (GHz)";
+    pg.yLabel = L"RCS (dBsm)";
+    pg.curves.push_back({ L"RCS", fGhz, dbsm, (TColor)0x00007700 });
+    chartForm->pages.push_back(pg);
+    chartForm->refreshPages();
+    chartForm->Show();
+    chartForm->BringToFront();
+    // update displayed currents to the last swept frequency
+    std::vector<Vec3> v; std::vector<int> idx; std::vector<float> mag;
+    momSurf->getTriCurrents(v, idx, mag);
+    glView->setTriCurrents(v, idx, mag);
+    statusBar->Panels->Items[0]->Text = String().sprintf(
+        L"RCS sweep done: %d points. Peak %.1f dBsm near %.0f MHz.",
+        (int)fr.size(), pk, pkF);
+}
+
 void __fastcall TMainForm::OnTimerTick(TObject *)
 {
+    if (usingSweep)
+    {
+        if (!momSurf)
+            return;
+        statusBar->Panels->Items[1]->Text = String().sprintf(
+            L"RCS sweep  %d / %d", momSurf->currentStep(),
+            momSurf->sweepTotal());
+        statusBar->Panels->Items[2]->Text = L"";
+        if (momSurf->isFinished())
+        {
+            finishThread();
+            if (!dftLoaded) { dftLoaded = true; finishSweep(); }
+        }
+        return;
+    }
     if (usingMomSurf)
     {
         if (!momSurf)
@@ -1366,6 +1434,49 @@ void __fastcall TMainForm::OnViewOptionChanged(TObject *)
 //---------------------------------------------------------------------------
 void TMainForm::showPlots()
 {
+    // surface MoM: run a monostatic RCS frequency sweep
+    if (usingMomSurf)
+    {
+        if (!momSurf || !momSurf->isFinished())
+        {
+            MessageDlg(L"Run the surface MoM solve once first (it builds the "
+                       L"RWG mesh the sweep reuses).",
+                       mtInformation, TMsgDlgButtons() << mbOK, 0);
+            return;
+        }
+        double f1 = simValue(L"RCS sweep f1 (MHz)", 10) * 1e6;
+        double f2 = simValue(L"RCS sweep f2 (MHz)", 40) * 1e6;
+        int pts = std::max(2, std::min(101,
+                  (int)simValue(L"RCS sweep points", 16)));
+        if (f1 <= 0 || f2 <= f1)
+        {
+            MessageDlg(L"Set RCS sweep f1 < f2 (MHz) in the simulation "
+                       L"settings.", mtError, TMsgDlgButtons() << mbOK, 0);
+            return;
+        }
+        double secsEach = momSurf->ranOnGpu() ? 8.0 : 25.0;
+        if (MessageDlg(String().sprintf(
+            L"Run a monostatic RCS sweep: %d points from %.0f to %.0f MHz "
+            L"(%d unknowns each).\nEach point is a full fill + solve "
+            L"(~%.0f s) -> roughly %.0f min total. Continue?",
+            pts, f1/1e6, f2/1e6, momSurf->numUnknowns(), secsEach,
+            pts * secsEach / 60.0),
+            mtConfirmation, TMsgDlgButtons() << mbYes << mbNo, 0) != mrYes)
+            return;
+        std::vector<float> freqs(pts);
+        for (int i = 0; i < pts; ++i)
+            freqs[i] = (float)(f1 + (f2 - f1) * i / (pts - 1));
+        usingSweep = true;
+        dftLoaded  = false;
+        MomSurface *ms = momSurf.get();
+        solverThread = std::thread([ms, freqs] { ms->runRcsSweep(freqs); });
+        threadJoined = false;
+        btnRun->Enabled  = false;
+        btnStop->Enabled = true;
+        statusBar->Panels->Items[0]->Text = String().sprintf(
+            L"RCS sweep: %d points, %.0f-%.0f MHz...", pts, f1/1e6, f2/1e6);
+        return;
+    }
     if (usingFem || usingMom)
     {
         bool ok = usingFem ? (femSolver && femSolver->isFinished() &&
