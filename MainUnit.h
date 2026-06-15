@@ -92,9 +92,14 @@ __published:    // IDE-managed Components
 	TMenuItem *N1;
 	TMenuItem *N2;
 	TToolBar *ToolBar1;
+	TPopupMenu *pmObjects;
+	TMenuItem *miDelete;
     void __fastcall OnAddClick(TObject *Sender);
     void __fastcall OnImportClick(TObject *Sender);
     void __fastcall OnDeleteClick(TObject *Sender);
+    void __fastcall OnObjectsKeyDown(TObject *Sender, System::Word &Key,
+                                     TShiftState Shift);
+    void __fastcall OnObjectDelete(TObject *Sender);
     void __fastcall OnRunClick(TObject *Sender);
     void __fastcall OnStopClick(TObject *Sender);
     void __fastcall OnZoomClick(TObject *Sender);
@@ -170,6 +175,7 @@ private:        // User declarations
 
     // helpers
     void refreshObjectList(int select);
+    void deleteSelectedObject();
     void refreshPropEditor();
     void updateSceneView();
     double simValue(const String &key, double def);

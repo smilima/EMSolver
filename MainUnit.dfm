@@ -238,8 +238,10 @@ object MainForm: TMainForm
       Height = 130
       Align = alTop
       ItemHeight = 15
+      PopupMenu = pmObjects
       TabOrder = 0
       OnClick = OnObjectSelect
+      OnKeyDown = OnObjectsKeyDown
     end
     object vleProps: TValueListEditor
       Left = 0
@@ -529,6 +531,14 @@ object MainForm: TMainForm
         Caption = 'Exit'
         OnClick = SaveAs2Click
       end
+    end
+  end
+  object pmObjects: TPopupMenu
+    Left = 120
+    Top = 112
+    object miDelete: TMenuItem
+      Caption = 'Delete'
+      OnClick = OnObjectDelete
     end
   end
 end

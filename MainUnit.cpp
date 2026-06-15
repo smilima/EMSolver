@@ -1394,17 +1394,46 @@ void __fastcall TMainForm::OnImportClick(TObject *)
 }
 
 //---------------------------------------------------------------------------
-void __fastcall TMainForm::OnDeleteClick(TObject *)
+// Confirm, then remove the selected list item. Shared by the toolbar button,
+// the Delete key, and the right-click context menu.
+void TMainForm::deleteSelectedObject()
 {
     int i = selectedIndex();
     if (i < 0 && objects.size() == 1)
         i = 0;                  // nothing selected but only one object: delete it
     if (i < 0)
         return;
+    String nm = String(objects[i].obj.name.c_str());
+    if (MessageDlg(String().sprintf(L"Delete \"%s\" from the model?", nm.c_str()),
+                   mtConfirmation, TMsgDlgButtons() << mbYes << mbNo, 0) != mrYes)
+        return;
     invalidateResults();
     objects.erase(objects.begin() + i);
     refreshObjectList(std::min(i, (int)objects.size() - 1));
     updateSceneView();
+}
+
+//---------------------------------------------------------------------------
+void __fastcall TMainForm::OnDeleteClick(TObject *)
+{
+    deleteSelectedObject();
+}
+
+//---------------------------------------------------------------------------
+void __fastcall TMainForm::OnObjectDelete(TObject *)
+{
+    deleteSelectedObject();
+}
+
+//---------------------------------------------------------------------------
+void __fastcall TMainForm::OnObjectsKeyDown(TObject *, System::Word &Key,
+                                            TShiftState)
+{
+    if (Key == VK_DELETE)
+    {
+        Key = 0;                // swallow the key so the list box ignores it
+        deleteSelectedObject();
+    }
 }
 
 //---------------------------------------------------------------------------
