@@ -105,6 +105,7 @@ __published:    // IDE-managed Components
     void __fastcall OnZoomClick(TObject *Sender);
     void __fastcall OnApplyClick(TObject *Sender);
     void __fastcall OnObjectSelect(TObject *Sender);
+    void __fastcall OnSolverChanged(TObject *Sender);
     void __fastcall OnViewOptionChanged(TObject *Sender);
     void __fastcall OnPlotsClick(TObject *Sender);
     void __fastcall OnFarFieldClick(TObject *Sender);
@@ -150,6 +151,7 @@ private:        // User declarations
     std::thread                solverThread;
     bool                       threadJoined  = true;
     bool                       dftLoaded     = false;
+    bool                       applyingProject = false;  // suppress combo handlers during load
     VoxelGridSpec              lastGrid;
     bool                       haveGrid      = false;
 

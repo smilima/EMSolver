@@ -105,6 +105,7 @@ object MainForm: TMainForm
       ItemIndex = 0
       TabOrder = 3
       Text = 'Solver: TLM (time domain)'
+      OnChange = OnSolverChanged
       Items.Strings = (
         'Solver: TLM (time domain)'
         'Solver: FDTD (time domain)'

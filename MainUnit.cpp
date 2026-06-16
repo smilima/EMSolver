@@ -1468,6 +1468,26 @@ void __fastcall TMainForm::OnObjectSelect(TObject *)
 }
 
 //---------------------------------------------------------------------------
+// Switching solvers makes the displayed results belong to the wrong method,
+// so clear everything shown (3D overlays, playback, plots). The scene model
+// stays. Save the project first (File -> Save) to keep the old results.
+void __fastcall TMainForm::OnSolverChanged(TObject *)
+{
+    if (applyingProject)
+        return;                      // programmatic change during project load
+    invalidateResults();             // clears currents/plane/pattern/playback
+    if (chartForm)
+    {
+        chartForm->pages.clear();
+        chartForm->refreshPages();
+        chartForm->Hide();
+    }
+    statusBar->Panels->Items[0]->Text = String().sprintf(
+        L"%s selected - previous results cleared. Run to compute again.",
+        cbSolver->Text.c_str());
+}
+
+//---------------------------------------------------------------------------
 void __fastcall TMainForm::OnViewOptionChanged(TObject *)
 {
     glView->showModel = chkModel->Checked;
@@ -2168,7 +2188,8 @@ bool TMainForm::loadProjectFrom(const String &path)
         setSimValue(String(AnsiString(kv.first.c_str())),
                     String(AnsiString(kv.second.c_str())));
 
-    // toolbar / view state
+    // toolbar / view state (suppress combo handlers while we set them)
+    applyingProject = true;
     cbSolver->ItemIndex     = d.solverIdx;
     cbExcitation->ItemIndex = d.excitationIdx;
     cbWaveform->ItemIndex   = d.waveformIdx;
@@ -2266,6 +2287,8 @@ bool TMainForm::loadProjectFrom(const String &path)
         loadedFrameCount = (int)loadedFrames.size();
         resetPlayback(true);
     }
+
+    applyingProject = false;         // re-enable combo handlers
 
     projectPath = path;
     Caption = L"RF Simulator - " + ExtractFileName(path);
