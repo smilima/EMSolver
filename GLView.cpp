@@ -8,6 +8,8 @@
 #include <gl/gl.h>
 #include <cmath>
 #include <algorithm>
+#include <cstdio>
+#include <cstring>
 
 #pragma package(smart_init)
 #pragma comment(lib, "opengl32")
@@ -65,6 +67,7 @@ void TGLView::releaseContext()
         wglMakeCurrent(0, 0);
         wglDeleteContext(hglrc);
         hglrc = 0;
+        fontBase = fontBaseAxis = 0;   // lists died with the context; rebuild
     }
     if (hdc && HandleAllocated())
     {
@@ -295,13 +298,14 @@ void __fastcall TGLView::MouseDown(TMouseButton Button, TShiftState Shift, int X
 {
     SetFocus();
     lastX = X; lastY = Y;
-    if (Button == mbLeft && probeDragEnabled)
+    if (Button == mbLeft)
     {
-        draggingProbe = true;       // grab the probe instead of rotating
-        probeDidMove  = false;
+        // defer rotate / probe-drag until the mouse actually moves, so a
+        // click that doesn't drag can be treated as a pick (select)
+        leftDown    = true;
+        dragStarted = false;
+        downX = X; downY = Y;
     }
-    else if (Button == mbLeft)
-        rotating = true;
     else if (Button == mbRight || Button == mbMiddle)
         panning = true;
     TCustomControl::MouseDown(Button, Shift, X, Y);
@@ -310,6 +314,21 @@ void __fastcall TGLView::MouseDown(TMouseButton Button, TShiftState Shift, int X
 //---------------------------------------------------------------------------
 void __fastcall TGLView::MouseMove(TShiftState Shift, int X, int Y)
 {
+    // promote a held left button to a drag once it moves past a small dead
+    // zone; below that it stays a click (handled as a pick on mouse-up)
+    if (leftDown && !dragStarted)
+    {
+        int mdx = X - downX, mdy = Y - downY;
+        if (mdx < 0) mdx = -mdx;
+        if (mdy < 0) mdy = -mdy;
+        if (mdx > 3 || mdy > 3)
+        {
+            dragStarted = true;
+            lastX = X; lastY = Y;            // start the drag delta here
+            if (probeDragEnabled) { draggingProbe = true; probeDidMove = false; }
+            else                    rotating = true;
+        }
+    }
     int dx = X - lastX, dy = Y - lastY;
     lastX = X; lastY = Y;
     if (draggingProbe)
@@ -364,15 +383,50 @@ void __fastcall TGLView::MouseMove(TShiftState Shift, int X, int Y)
 //---------------------------------------------------------------------------
 void __fastcall TGLView::MouseUp(TMouseButton Button, TShiftState Shift, int X, int Y)
 {
-    if (draggingProbe)
+    if (Button == mbLeft)
     {
-        draggingProbe = false;
-        if (probeDidMove && onProbeMoved)
-            onProbeMoved(probeDragPos, true);   // final: commit / mark stale
-        probeDidMove = false;
+        if (leftDown && !dragStarted && onPick)
+        {
+            // a click (no drag): pick the object under the cursor
+            Vec3 ro, rd;
+            if (computeRay(downX, downY, ro, rd))
+                onPick(ro, rd);
+        }
+        if (draggingProbe)
+        {
+            draggingProbe = false;
+            if (probeDidMove && onProbeMoved)
+                onProbeMoved(probeDragPos, true);   // final: commit / mark stale
+            probeDidMove = false;
+        }
+        leftDown = dragStarted = rotating = false;
     }
-    rotating = panning = false;
+    else if (Button == mbRight || Button == mbMiddle)
+        panning = false;
     TCustomControl::MouseUp(Button, Shift, X, Y);
+}
+
+//---------------------------------------------------------------------------
+// World-space pick ray (origin at the eye) through screen pixel (px, py).
+bool TGLView::computeRay(int px, int py, Vec3 &origin, Vec3 &dir)
+{
+    int w = std::max(1, (int)ClientWidth), h = std::max(1, (int)ClientHeight);
+    float cy = std::cos(camYaw), sy = std::sin(camYaw);
+    float cp = std::cos(camPitch), sp = std::sin(camPitch);
+    Vec3 eye   = camTarget + Vec3(cp * cy, cp * sy, sp) * camDist;
+    Vec3 fwd   = (camTarget - eye).normalized();
+    Vec3 right = fwd.cross(Vec3(0, 0, 1)).normalized();
+    if (right.length2() < 1e-10f)
+        right = Vec3(0, 1, 0);
+    Vec3 up    = right.cross(fwd);
+    float aspect = (float)w / (float)h;
+    float tan22  = (float)std::tan(22.5 * M_PI / 180.0);
+    float ndcX = 2.0f * (float)px / (float)w - 1.0f;
+    float ndcY = 1.0f - 2.0f * (float)py / (float)h;
+    origin = eye;
+    dir = (fwd + right * (ndcX * aspect * tan22) + up * (ndcY * tan22))
+          .normalized();
+    return true;
 }
 
 //---------------------------------------------------------------------------
@@ -1022,11 +1076,11 @@ void TGLView::drawDomainBox()
 //---------------------------------------------------------------------------
 void TGLView::drawAxes()
 {
-    // small triad in the lower-left corner
-    glViewport(8, 8, 70, 70);
+    // triad in the lower-left corner, sized to keep the X/Y/Z labels legible
+    glViewport(8, 8, 128, 128);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    glOrtho(-1.4, 1.4, -1.4, 1.4, -2.5, 2.5);
+    glOrtho(-1.8, 1.8, -1.8, 1.8, -2.5, 2.5);
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
     float cy = std::cos(camYaw), sy = std::sin(camYaw);
@@ -1047,14 +1101,78 @@ void TGLView::drawAxes()
 
     glDisable(GL_LIGHTING);
     glDisable(GL_DEPTH_TEST);
-    glLineWidth(2.0f);
+    glLineWidth(3.0f);
     glBegin(GL_LINES);
     glColor3f(0.9f, 0.3f, 0.3f); glVertex3f(0, 0, 0); glVertex3f(1, 0, 0);
     glColor3f(0.3f, 0.9f, 0.3f); glVertex3f(0, 0, 0); glVertex3f(0, 1, 0);
     glColor3f(0.35f, 0.5f, 1.0f); glVertex3f(0, 0, 0); glVertex3f(0, 0, 1);
     glEnd();
     glLineWidth(1.0f);
+
+    // axis letters, just past each tip, colour-matched to the axes
+    ensureFont();
+    glColor3f(1.0f, 0.55f, 0.55f); drawText3(1.12f, 0.0f, 0.0f, "X");
+    glColor3f(0.55f, 1.0f, 0.55f); drawText3(0.0f, 1.12f, 0.0f, "Y");
+    glColor3f(0.6f,  0.7f,  1.0f); drawText3(0.0f, 0.0f, 1.12f, "Z");
+
     glEnable(GL_DEPTH_TEST);
+}
+
+//---------------------------------------------------------------------------
+// Lazily build a bitmap font (display lists) for 2D overlay text. Requires a
+// current GL context, so it is called from the draw path, not setup.
+void TGLView::ensureFont()
+{
+    if (fontBase || !hdc)
+        return;
+    LOGFONTA lf;
+    memset(&lf, 0, sizeof(lf));
+    lf.lfCharSet = ANSI_CHARSET;
+    lf.lfQuality = ANTIALIASED_QUALITY;
+    strcpy(lf.lfFaceName, "Segoe UI");
+
+    // small font for the legend text
+    fontBase = glGenLists(96);              // ASCII 32..127
+    lf.lfHeight = -13;
+    lf.lfWeight = FW_NORMAL;
+    HFONT font = CreateFontIndirectA(&lf);
+    HFONT prev = (HFONT)SelectObject(hdc, font);
+    wglUseFontBitmapsA(hdc, 32, 96, fontBase);
+    SelectObject(hdc, prev);
+    DeleteObject(font);
+
+    // larger bold font for the axis X/Y/Z labels
+    fontBaseAxis = glGenLists(96);
+    lf.lfHeight = -20;
+    lf.lfWeight = FW_BOLD;
+    HFONT fontA = CreateFontIndirectA(&lf);
+    prev = (HFONT)SelectObject(hdc, fontA);
+    wglUseFontBitmapsA(hdc, 32, 96, fontBaseAxis);
+    SelectObject(hdc, prev);
+    DeleteObject(fontA);
+}
+
+//---------------------------------------------------------------------------
+// Draw a string with its lower-left at screen (x, y) in the current 2D ortho.
+void TGLView::drawText(int x, int y, const char *s)
+{
+    if (!fontBase || !s || !*s)
+        return;
+    glRasterPos2i(x, y);
+    glListBase(fontBase - 32);
+    glCallLists((GLsizei)strlen(s), GL_UNSIGNED_BYTE, s);
+}
+
+//---------------------------------------------------------------------------
+// Draw a string anchored at world point (x, y, z) under the current 3D
+// transform (the bitmap is laid out in screen pixels from that point).
+void TGLView::drawText3(float x, float y, float z, const char *s)
+{
+    if (!fontBaseAxis || !s || !*s)
+        return;
+    glRasterPos3f(x, y, z);
+    glListBase(fontBaseAxis - 32);
+    glCallLists((GLsizei)strlen(s), GL_UNSIGNED_BYTE, s);
 }
 
 //---------------------------------------------------------------------------
@@ -1093,5 +1211,37 @@ void TGLView::drawLegend()
     glVertex2f((float)x1, (float)y1);
     glVertex2f((float)x0, (float)y1);
     glEnd();
+
+    // ---- range + unit labels --------------------------------------------
+    ensureFont();
+    float norm = (faceNorm > 0.0f) ? faceNorm : currentMax;   // value at t=1
+    int   ymid = (y0 + y1) / 2;
+    int   lx   = x0 - 6;                  // labels sit just left of the bar
+    char  buf[48];
+    glColor3f(0.90f, 0.92f, 0.96f);
+
+    if (dbScale)
+    {
+        // bar spans 0 dB (top) down to -dbRange (bottom), relative to 'norm'
+        drawText(lx - 26, y1 - 5, "0 dB");
+        snprintf(buf, sizeof(buf), "%g", -0.5 * dbRange);
+        drawText(lx - 36, ymid - 5, buf);
+        snprintf(buf, sizeof(buf), "%g", -(double)dbRange);
+        drawText(lx - 42, y0 - 5, buf);
+        // header: quantity + scale; reference line gives the absolute value
+        drawText(x0 - 60, y1 + 16, "|Js| (dB)");
+        snprintf(buf, sizeof(buf), "0 dB = %.3g A/m", (double)norm);
+        drawText(x0 - 96, y0 - 22, buf);
+    }
+    else
+    {
+        snprintf(buf, sizeof(buf), "%.3g", (double)norm);
+        drawText(lx - 48, y1 - 5, buf);
+        snprintf(buf, sizeof(buf), "%.3g", 0.5 * (double)norm);
+        drawText(lx - 48, ymid - 5, buf);
+        drawText(lx - 12, y0 - 5, "0");
+        drawText(x0 - 78, y1 + 16, "|Js| (A/m)");
+    }
+
     glEnable(GL_DEPTH_TEST);
 }

@@ -283,6 +283,8 @@ object MainForm: TMainForm
         'Boundary rho=0'
         'PW prop axis (0..2)=0'
         'PW pol axis (0..2)=2'
+        'PW power density (W/m^2)=1'
+        'Wire port power (W)=1'
         'Cut plane axis=1'
         'RCS sweep f1 (MHz)=10'
         'RCS sweep f2 (MHz)=40'

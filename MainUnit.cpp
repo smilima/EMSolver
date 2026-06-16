@@ -53,6 +53,8 @@ __fastcall TMainForm::TMainForm(TComponent* Owner)
     glView->Align = alClient;
     glView->onProbeMoved =
         [this](const Vec3 &p, bool done) { onProbeDragged(p, done); };
+    glView->onPick =
+        [this](const Vec3 &o, const Vec3 &d) { onPickRay(o, d); };
 
     // component palette entries come from the AntennaKind enum
     cbAddKind->Items->BeginUpdate();
@@ -187,6 +189,127 @@ void TMainForm::onProbeDragged(const Vec3 &pos, bool done)
 
     if (done)
         invalidateResults();         // probe moved -> previous results stale
+}
+
+//---------------------------------------------------------------------------
+// Ray-geometry helpers for click-to-select picking. 'rd' is a unit direction,
+// so the returned parameter t is a world-space distance along the ray.
+//---------------------------------------------------------------------------
+static bool RayTri(const Vec3 &ro, const Vec3 &rd, const Vec3 &a,
+                   const Vec3 &b, const Vec3 &c, float &t)
+{
+    Vec3 e1 = b - a, e2 = c - a;
+    Vec3 p = rd.cross(e2);
+    float det = e1.dot(p);
+    if (std::fabs(det) < 1e-12f)
+        return false;
+    float inv = 1.0f / det;
+    Vec3 tv = ro - a;
+    float u = tv.dot(p) * inv;
+    if (u < 0.0f || u > 1.0f)
+        return false;
+    Vec3 q = tv.cross(e1);
+    float v = rd.dot(q) * inv;
+    if (v < 0.0f || u + v > 1.0f)
+        return false;
+    t = e2.dot(q) * inv;
+    return t > 0.0f;
+}
+
+//---------------------------------------------------------------------------
+static void RayPointDist(const Vec3 &ro, const Vec3 &rd, const Vec3 &p,
+                         float &dist, float &t)
+{
+    t = (p - ro).dot(rd);
+    if (t < 0.0f) t = 0.0f;
+    dist = (p - (ro + rd * t)).length();
+}
+
+//---------------------------------------------------------------------------
+static void RaySegDist(const Vec3 &ro, const Vec3 &rd, const Vec3 &p0,
+                       const Vec3 &p1, float &dist, float &tRay)
+{
+    Vec3 v = p1 - p0;
+    Vec3 w0 = ro - p0;
+    float a = rd.dot(rd);          // = 1
+    float b = rd.dot(v);
+    float c = v.dot(v);
+    float d = rd.dot(w0);
+    float e = v.dot(w0);
+    float denom = a * c - b * b;
+    float sc, tc;
+    if (denom < 1e-12f) { sc = 0.0f; tc = (c > 1e-12f) ? e / c : 0.0f; }
+    else { sc = (b * e - c * d) / denom; tc = (a * e - b * d) / denom; }
+    if (sc < 0.0f) sc = 0.0f;
+    if (tc < 0.0f) tc = 0.0f; else if (tc > 1.0f) tc = 1.0f;
+    dist = ((ro + rd * sc) - (p0 + v * tc)).length();
+    tRay = sc;
+}
+
+//---------------------------------------------------------------------------
+// Nearest scene object hit by the pick ray, or -1. Triangles hit exactly;
+// wire segments and probe points hit within a screen-space tolerance that
+// grows with distance (so far objects are no harder to click than near ones).
+int TMainForm::pickObject(const Vec3 &ro, const Vec3 &rd)
+{
+    int   best = -1;
+    float bestT = 1e30f;
+    int   h = std::max(1, (int)glView->ClientHeight);
+    const float tan22  = 0.41421356f;          // tan(22.5 deg)
+    const float pickPx = 10.0f;
+
+    for (int i = 0; i < (int)objects.size(); ++i)
+    {
+        const SceneObject &o = objects[i].obj;
+        float objT = 1e30f;
+        bool  hit  = false;
+
+        // triangle meshes (STL, horn, plate, box, sphere)
+        const TriMesh &m = o.mesh;
+        for (size_t k = 0; k + 2 < m.idx.size(); k += 3)
+        {
+            Vec3 a = m.verts[m.idx[k]]     + o.position;
+            Vec3 b = m.verts[m.idx[k + 1]] + o.position;
+            Vec3 c = m.verts[m.idx[k + 2]] + o.position;
+            float t;
+            if (RayTri(ro, rd, a, b, c, t) && t < objT) { objT = t; hit = true; }
+        }
+        // wire antennas (yagi, dipole, LPDA, helix)
+        for (const auto &w : o.wires)
+            for (size_t s = 0; s + 1 < w.pts.size(); ++s)
+            {
+                float dist, t;
+                RaySegDist(ro, rd, w.pts[s] + o.position,
+                           w.pts[s + 1] + o.position, dist, t);
+                float thr = pickPx * 2.0f * t * tan22 / (float)h;
+                if (t > 0.0f && dist < thr && t < objT) { objT = t; hit = true; }
+            }
+        // E-field probe (point marker, no geometry)
+        if (o.kind == (int)AntennaKind::Probe)
+        {
+            float dist, t;
+            RayPointDist(ro, rd, o.position, dist, t);
+            float thr = pickPx * 1.5f * 2.0f * t * tan22 / (float)h;
+            if (t > 0.0f && dist < thr && t < objT) { objT = t; hit = true; }
+        }
+
+        if (hit && objT < bestT) { bestT = objT; best = i; }
+    }
+    return best;
+}
+
+//---------------------------------------------------------------------------
+// Click-to-select: a click in the 3D view selects the object under the cursor
+// in the components list (clicking empty space keeps the current selection).
+void TMainForm::onPickRay(const Vec3 &origin, const Vec3 &dir)
+{
+    int idx = pickObject(origin, dir);
+    if (idx >= 0 && idx != lbObjects->ItemIndex)
+    {
+        lbObjects->ItemIndex = idx;
+        refreshPropEditor();     // update properties + probe-drag arming
+        updateSceneView();       // redraw with the new selection highlighted
+    }
 }
 
 //---------------------------------------------------------------------------
@@ -780,6 +903,7 @@ void TMainForm::startSimulation()
         solver.reset(new TlmSolver());
     solver->setup(g, std::move(mat), std::move(matTable), cfg);
 
+    String driveNote;
     if (planeWave)
     {
         int pa = (int)simValue(L"PW prop axis (0..2)", 0);
@@ -788,12 +912,24 @@ void TMainForm::startSimulation()
         pol = std::max(0, std::min(2, pol));
         if (pol == pa)
             pol = (pa + 2) % 3;
-        solver->addPlaneWave(pa, std::max(2, pad / 2), pol, 1.0f);
+        // incident power density (W/m^2) -> E-field amplitude (V/m):
+        // S = E0^2 / (2*eta0)  ->  E0 = sqrt(2*eta0*S),  eta0 = 376.73 ohm
+        double S = std::max(0.0, simValue(L"PW power density (W/m^2)", 1.0));
+        float E0 = (float)std::sqrt(2.0 * 376.730313668 * S);
+        solver->addPlaneWave(pa, std::max(2, pad / 2), pol, E0);
+        driveNote = String().sprintf(L"  |  PW %.3g W/m^2 (E0=%.3g V/m)", S,
+                                     (double)E0);
     }
     else
     {
+        // available power (W) into a 50 ohm reference -> drive voltage (V):
+        // P = V^2 / (2*Z0)  ->  V = sqrt(2*Z0*P),  Z0 = 50 ohm
+        double P = std::max(0.0, simValue(L"Wire port power (W)", 1.0));
+        float V = (float)std::sqrt(2.0 * 50.0 * P);
         for (const auto &fs : feedSets)
-            solver->addPort(fs.cells, fs.pol, 1.0f);
+            solver->addPort(fs.cells, fs.pol, V);
+        driveNote = String().sprintf(L"  |  port %.3g W (V=%.3g V)", P,
+                                     (double)V);
     }
 
     // E-field probes
@@ -848,8 +984,8 @@ void TMainForm::startSimulation()
 
     statusBar->Panels->Items[0]->Text = String().sprintf(
         L"Running %s: %d x %d x %d cells (%.1f M, %.0f MB), dt=%.3g ps, "
-        L"%d steps", solver->solverName(), g.nx, g.ny, g.nz, cells / 1e6,
-        memMb, (double)solver->timestep() * 1e12, total);
+        L"%d steps%s", solver->solverName(), g.nx, g.ny, g.nz, cells / 1e6,
+        memMb, (double)solver->timestep() * 1e12, total, driveNote.c_str());
 
     IFieldSolver *s = solver.get();
     solverThread = std::thread([s] { s->run(); });

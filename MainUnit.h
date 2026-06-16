@@ -180,6 +180,8 @@ private:        // User declarations
     void deleteSelectedObject();
     void refreshPropEditor();
     void onProbeDragged(const Vec3 &pos, bool done);  // live probe drag in 3D
+    int  pickObject(const Vec3 &ro, const Vec3 &rd);  // nearest object hit by a ray
+    void onPickRay(const Vec3 &origin, const Vec3 &dir);  // click-to-select in 3D
     void updateSceneView();
     double simValue(const String &key, double def);
     void setSimValue(const String &key, const String &v);

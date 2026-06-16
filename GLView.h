@@ -90,6 +90,10 @@ public:
     void setProbeDrag(bool enabled, const Vec3 &pos);
     std::function<void(const Vec3 &, bool)> onProbeMoved;
 
+    // click-to-select: fired when the user clicks (does not drag) in the
+    // viewport, with a world-space pick ray (origin at the eye, unit dir)
+    std::function<void(const Vec3 &origin, const Vec3 &dir)> onPick;
+
     // synchronous framebuffer capture (RGB, top-down row order)
     bool captureFrame(std::vector<unsigned char> &rgb, int &w, int &h);
 
@@ -117,6 +121,7 @@ private:
     void ensureContext();
     void releaseContext();
     void applyCamera();
+    bool computeRay(int px, int py, Vec3 &origin, Vec3 &dir);
     void drawScene();
     void drawMeshes();
     void drawWires();
@@ -127,9 +132,14 @@ private:
     void drawDomainBox();
     void drawAxes();
     void drawLegend();
+    void ensureFont();
+    void drawText(int x, int y, const char *s);
+    void drawText3(float x, float y, float z, const char *s);
 
     HDC   hdc  = 0;
     HGLRC hglrc = 0;
+    unsigned fontBase = 0;     // small bitmap font (legend text)
+    unsigned fontBaseAxis = 0; // larger bold bitmap font (axis X/Y/Z labels)
 
     // camera
     Vec3  camTarget{0, 0, 0};
@@ -144,6 +154,11 @@ private:
     bool  draggingProbe    = false;
     bool  probeDidMove     = false;
     Vec3  probeDragPos;
+
+    // left click-vs-drag tracking (a click picks/selects, a drag rotates)
+    bool  leftDown    = false;
+    bool  dragStarted = false;
+    int   downX = 0, downY = 0;
 
     // display copies (owned by this control, updated from UI thread)
     struct DispMesh
