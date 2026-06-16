@@ -295,7 +295,12 @@ void __fastcall TGLView::MouseDown(TMouseButton Button, TShiftState Shift, int X
 {
     SetFocus();
     lastX = X; lastY = Y;
-    if (Button == mbLeft)
+    if (Button == mbLeft && probeDragEnabled)
+    {
+        draggingProbe = true;       // grab the probe instead of rotating
+        probeDidMove  = false;
+    }
+    else if (Button == mbLeft)
         rotating = true;
     else if (Button == mbRight || Button == mbMiddle)
         panning = true;
@@ -307,6 +312,30 @@ void __fastcall TGLView::MouseMove(TShiftState Shift, int X, int Y)
 {
     int dx = X - lastX, dy = Y - lastY;
     lastX = X; lastY = Y;
+    if (draggingProbe)
+    {
+        // slide the probe in the plane parallel to the screen (same camera
+        // basis as the pan code), scaled so it tracks the cursor at its depth
+        float cy = std::cos(camYaw), sy = std::sin(camYaw);
+        float cp = std::cos(camPitch), sp = std::sin(camPitch);
+        Vec3 eye   = camTarget + Vec3(cp * cy, cp * sy, sp) * camDist;
+        Vec3 fwd   = (camTarget - eye).normalized();
+        Vec3 right = fwd.cross(Vec3(0, 0, 1)).normalized();
+        if (right.length2() < 1e-10f)
+            right = Vec3(0, 1, 0);
+        Vec3 up    = right.cross(fwd);
+        int  h     = std::max(1, (int)ClientHeight);
+        float depth = std::max(1e-4f, (probeDragPos - eye).dot(fwd));
+        float wpp = 2.0f * depth * std::tan(22.5f * (float)M_PI / 180.0f)
+                    / (float)h;
+        probeDragPos = probeDragPos + right * (dx * wpp) - up * (dy * wpp);
+        probeDidMove = true;
+        if (onProbeMoved)
+            onProbeMoved(probeDragPos, false);
+        Invalidate();
+        TCustomControl::MouseMove(Shift, X, Y);
+        return;
+    }
     if (rotating)
     {
         camYaw   -= dx * 0.008f;
@@ -335,8 +364,24 @@ void __fastcall TGLView::MouseMove(TShiftState Shift, int X, int Y)
 //---------------------------------------------------------------------------
 void __fastcall TGLView::MouseUp(TMouseButton Button, TShiftState Shift, int X, int Y)
 {
+    if (draggingProbe)
+    {
+        draggingProbe = false;
+        if (probeDidMove && onProbeMoved)
+            onProbeMoved(probeDragPos, true);   // final: commit / mark stale
+        probeDidMove = false;
+    }
     rotating = panning = false;
     TCustomControl::MouseUp(Button, Shift, X, Y);
+}
+
+//---------------------------------------------------------------------------
+void TGLView::setProbeDrag(bool enabled, const Vec3 &pos)
+{
+    probeDragEnabled = enabled;
+    probeDragPos = pos;
+    if (!enabled)
+        draggingProbe = false;
 }
 
 //---------------------------------------------------------------------------

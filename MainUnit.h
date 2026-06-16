@@ -179,6 +179,7 @@ private:        // User declarations
     void refreshObjectList(int select);
     void deleteSelectedObject();
     void refreshPropEditor();
+    void onProbeDragged(const Vec3 &pos, bool done);  // live probe drag in 3D
     void updateSceneView();
     double simValue(const String &key, double def);
     void setSimValue(const String &key, const String &v);

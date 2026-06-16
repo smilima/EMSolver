@@ -51,6 +51,8 @@ __fastcall TMainForm::TMainForm(TComponent* Owner)
     glView = new TGLView(this);
     glView->Parent = pnlView;
     glView->Align = alClient;
+    glView->onProbeMoved =
+        [this](const Vec3 &p, bool done) { onProbeDragged(p, done); };
 
     // component palette entries come from the AntennaKind enum
     cbAddKind->Items->BeginUpdate();
@@ -156,6 +158,35 @@ void TMainForm::refreshPropEditor()
             vleProps->InsertRow(String(p.first.c_str()), FmtD(p.second), true);
     }
     vleProps->Strings->EndUpdate();
+
+    // an E-field probe selected -> let the mouse drag it in the 3D view
+    bool isProbe = (i >= 0 &&
+                    objects[i].obj.kind == (int)AntennaKind::Probe);
+    glView->setProbeDrag(isProbe, isProbe ? objects[i].obj.position : Vec3());
+}
+
+//---------------------------------------------------------------------------
+// Live callback while the user drags the selected E-field probe in the 3D
+// view: update its position, the Pos X/Y/Z boxes, and the marker.
+void TMainForm::onProbeDragged(const Vec3 &pos, bool done)
+{
+    int i = selectedIndex();
+    if (i < 0 || objects[i].obj.kind != (int)AntennaKind::Probe)
+        return;
+    objects[i].obj.position = pos;
+
+    vleProps->Values[L"Pos X (m)"] = FmtD(pos.x);
+    vleProps->Values[L"Pos Y (m)"] = FmtD(pos.y);
+    vleProps->Values[L"Pos Z (m)"] = FmtD(pos.z);
+
+    std::vector<Vec3> probePts;
+    for (const auto &e : objects)
+        if (e.obj.kind == (int)AntennaKind::Probe)
+            probePts.push_back(e.obj.position);
+    glView->setProbeMarkers(probePts);
+
+    if (done)
+        invalidateResults();         // probe moved -> previous results stale
 }
 
 //---------------------------------------------------------------------------

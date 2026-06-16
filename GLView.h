@@ -9,6 +9,7 @@
 #include "Geometry.h"
 #include "TlmSolver.h"
 #include <vector>
+#include <functional>
 
 // Snapshot of everything shown in the viewport, for project save/load.
 struct GLResult
@@ -83,6 +84,12 @@ public:
     // E-field probe markers (world positions)
     void setProbeMarkers(const std::vector<Vec3> &pts);
 
+    // When enabled, a left-drag moves the probe at 'pos' in the screen plane
+    // instead of rotating the camera; onProbeMoved reports the new world
+    // position (second arg true on drag end). 'pos' tracks the live position.
+    void setProbeDrag(bool enabled, const Vec3 &pos);
+    std::function<void(const Vec3 &, bool)> onProbeMoved;
+
     // synchronous framebuffer capture (RGB, top-down row order)
     bool captureFrame(std::vector<unsigned char> &rgb, int &w, int &h);
 
@@ -131,6 +138,12 @@ private:
     float camPitch = 0.45f;
     int   lastX = 0, lastY = 0;
     bool  rotating = false, panning = false;
+
+    // probe dragging
+    bool  probeDragEnabled = false;
+    bool  draggingProbe    = false;
+    bool  probeDidMove     = false;
+    Vec3  probeDragPos;
 
     // display copies (owned by this control, updated from UI thread)
     struct DispMesh
